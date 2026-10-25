@@ -1,6 +1,7 @@
 packages:
   - "packages/*"
   - "apps/*"
+  - "supabase"
 
 # Chỉ cho phép script cài đặt của các gói đã duyệt (pnpm mặc định chặn).
 allowBuilds:
