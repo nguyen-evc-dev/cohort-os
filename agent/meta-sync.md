@@ -66,6 +66,11 @@ Phân trang: nếu kết quả có `pagination.next_cursor` thì gọi lại v�
 
 **2g. Lịch sử đổi budget** → `activity.json`. `ads_account_get_activity_logs`: `event_category = "budget"`, `start_time` = TARGET − 7 ngày (`YYYY-MM-DDT00:00:00Z`), `limit = 200`.
 
+**Lưu ý thực tế (rút từ lần chạy đầu 25/10):**
+- Field `targeting` rất dài (hàng nghìn ký tự mỗi adset, kèm cả `rule` của audience). Lấy adset **theo từng nhóm ≤ 5 `object_ids`**, chỉ chép phần cần cho `targeting_summary`, bỏ `rule`.
+- File lớn (`ads.json`, `creatives.json`) dễ bị cắt dở khi ghi một lần. Sau khi ghi, **đọc lại để chắc file là JSON hoàn chỉnh** (mở được, mảng đóng ngoặc đủ) trước khi chạy `sync:push`. Cắt dở thì ghi đè lại toàn bộ.
+- Dòng `ad_entities` rỗng (không có `id`) là bình thường, bỏ qua.
+
 Trước khi dùng field nào **khác** danh sách trên, phải kiểm tra bằng `ads_get_field_context`. Không tự thêm field.
 
 ## 3. Ghi file vào `sync/inbox/<TARGET>/`

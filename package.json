@@ -10,6 +10,7 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "test:security": "pnpm --filter @cohort/db test:security",
     "sync:gate": "tsx apps/sync/src/cli/gate.ts",
+    "sync:verify": "tsx apps/sync/src/cli/verify.ts",
     "sync:push": "tsx apps/sync/src/cli/push.ts",
     "bot:token": "tsx apps/sync/src/cli/bot-token.ts"
   },
