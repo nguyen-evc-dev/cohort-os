@@ -68,6 +68,8 @@ export interface ReportInput {
   entities?: Row[];
   submissions?: Row[];
   deals?: Row[];
+  /** Stage gắn tay (ghi đè stage tự nhận từ tên): theo concept_key và theo ad_id. Ưu tiên: ad > concept > tự nhận. */
+  stageOverrides?: { byConcept?: Record<string, string>; byAd?: Record<string, string> };
 }
 
 const div = (a: number, b: number): number | null => (b > 0 ? a / b : null);
@@ -190,7 +192,11 @@ export function buildProjectReport(input: ReportInput): ProjectReport {
     if (r.provisional) { d.provisional = true; provisional.add(String(r.date)); }
     daily.set(r.date, d);
   }
-  for (const a of ads.values()) a.status = String(entitiesById.get(`ad||${a.id}`)?.effective_status || '');
+  const ov = input.stageOverrides || {};
+  for (const a of ads.values()) {
+    a.status = String(entitiesById.get(`ad||${a.id}`)?.effective_status || '');
+    a.stage = ov.byAd?.[a.id] || ov.byConcept?.[a.conceptKey] || a.stage;
+  }
 
   // ---- CRM ----
   const hasCrm = (input.submissions || []).length > 0;

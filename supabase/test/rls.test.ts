@@ -302,3 +302,16 @@ describe('cổng công khai (thumb_allowed, share_open) — T2.5 / T2.9', () => 
     expect(r.rows).toEqual([{ n: 'share_open', o: 'gateway' }, { n: 'thumb_allowed', o: 'gateway' }]);
   });
 });
+
+describe('creative_assets.stage (gắn stage thủ công)', () => {
+  it('chỉ nhận TOFU / MOFU / BOFU hoặc null', async () => {
+    await as('authenticated', `insert into public.creative_assets (scope, concept_key, stage) values ('concept', 'photo poster kv', 'MOFU')`, ADMIN);
+    await as('authenticated', `insert into public.creative_assets (scope, ad_id, stage) values ('ad', '120252743565200233', null)`, ADMIN);
+    await expect(db.exec(`insert into public.creative_assets (scope, concept_key, stage) values ('concept', 'x', 'MOF')`)).rejects.toThrow(/violates check constraint/);
+    const rows = await as<{ stage: string | null }>('authenticated', `select stage from public.creative_assets where concept_key = 'photo poster kv'`, ADMIN);
+    expect(rows).toEqual([{ stage: 'MOFU' }]);
+  });
+  it('anon vẫn không đọc được creative_assets (stage không lộ)', async () => {
+    await denied(as('anon', 'select stage from public.creative_assets'));
+  });
+});

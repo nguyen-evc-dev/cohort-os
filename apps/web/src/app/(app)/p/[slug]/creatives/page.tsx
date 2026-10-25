@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation';
 import type { ConceptRow, Row } from '@cohort/core';
 import { createClient } from '@/lib/supabase/server';
 import { getWorkspace } from '@/lib/server-data';
-import { fetchAll, loadReport } from '@/lib/data';
+import { loadAssets, loadReport } from '@/lib/data';
 import { filterQuery, parseFilters, showCrm } from '@/lib/filters';
 import { fmtInt, fmtMoney, fmtRange, fmtRate } from '@/lib/format';
 import { Banner, PageHead } from '@/components/ui';
@@ -25,7 +25,7 @@ export default async function CreativeVault({ params, searchParams }: { params: 
   const loaded = await loadReport(db, ws, slug, f);
   if (!loaded) notFound();
   const { project, report: r } = loaded;
-  const assets = await fetchAll((a, b) => db.from('creative_assets').select('id,scope,concept_key,ad_id,drive_file_id,post_url').order('id').range(a, b));
+  const { rows: assets, stageReady } = await loadAssets(db);
   const assetOf = (c: ConceptRow) => assets.find((x) => (x.scope === 'concept' && x.concept_key === c.conceptKey) || (x.scope === 'ad' && c.ads.includes(String(x.ad_id))));
   const adNames = new Map<string, string>();
   const walk = (ns: typeof r.tree) => ns.forEach((n) => { if (n.level === 'ad') adNames.set(n.id, n.name); walk(n.children); });
@@ -77,7 +77,8 @@ export default async function CreativeVault({ params, searchParams }: { params: 
             return (
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                 <AssetDialog conceptKey={c.conceptKey} conceptName={c.concept} ads={c.ads.map((id) => ({ id, name: adNames.get(id) ?? id }))}
-                  existing={asset ? { id: asset.id, scope: asset.scope, fileId: asset.drive_file_id, postUrl: asset.post_url } : null} />
+                  existing={asset ? { id: asset.id, scope: asset.scope, fileId: asset.drive_file_id, postUrl: asset.post_url } : null}
+                  stage={(asset?.stage as string | null | undefined) ?? null} currentStages={c.stages} stageReady={stageReady} />
                 {asset?.post_url && <a className="cap" href={asset.post_url} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'underline', marginTop: 4 }}>Xem post ↗</a>}
               </div>
             );

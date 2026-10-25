@@ -78,6 +78,26 @@ export async function loadSignals(db: SupabaseClient): Promise<{ asOf: string | 
   return { asOf, rows };
 }
 
+/**
+ * creative_assets (kèm cột stage). Nếu migration creative_stage chưa được đẩy lên DB thì cột stage chưa có:
+ * đọc lại không có stage để trang vẫn chạy (stage thủ công sẽ chưa có tác dụng).
+ */
+export async function loadAssets(db: SupabaseClient): Promise<{ rows: Row[]; stageReady: boolean }> {
+  const sel = (cols: string) => fetchAll((a, b) => db.from('creative_assets').select(cols).order('id').range(a, b));
+  try { return { rows: await sel('id,scope,concept_key,ad_id,drive_file_id,post_url,stage'), stageReady: true }; }
+  catch { return { rows: await sel('id,scope,concept_key,ad_id,drive_file_id,post_url'), stageReady: false }; }
+}
+
+export function stageOverridesFrom(assets: Row[]): { byConcept: Record<string, string>; byAd: Record<string, string> } {
+  const byConcept: Record<string, string> = {}; const byAd: Record<string, string> = {};
+  for (const a of assets) {
+    if (!a.stage) continue;
+    if (a.scope === 'concept' && a.concept_key) byConcept[a.concept_key] = a.stage;
+    if (a.scope === 'ad' && a.ad_id) byAd[String(a.ad_id)] = a.stage;
+  }
+  return { byConcept, byAd };
+}
+
 /** Project "all" = toàn tài khoản (mọi campaign, chưa cần gán). */
 export const ALL_SLUG = 'all';
 
@@ -101,13 +121,13 @@ export interface LoadedReport { project: ProjectView; report: ProjectReport; ent
 export async function loadReport(db: SupabaseClient, ws: Workspace, slug: string, f: Filters): Promise<LoadedReport | null> {
   const project = resolveProject(ws, slug);
   if (!project) return null;
-  const [metaRows, entities, crm, sig] = await Promise.all([
+  const [metaRows, entities, crm, sig, assets] = await Promise.all([
     loadMeta(db, f), loadEntities(db),
     project.id ? loadCrm(db, project.id) : Promise.resolve({ submissions: [] as Row[], deals: [] as Row[] }),
-    loadSignals(db),
+    loadSignals(db), loadAssets(db),
   ]);
   const report = buildProjectReport({
-    metaRows, campaignIds: project.campaignIds, range: { from: f.from, to: f.to }, entities, ...crm,
+    metaRows, campaignIds: project.campaignIds, range: { from: f.from, to: f.to }, entities, ...crm, stageOverrides: stageOverridesFrom(assets.rows),
   });
   const camps = project.campaignIds ? new Set(project.campaignIds) : null;
   const signals = sig.rows.filter((s) => !camps || camps.has(String(s.numbers?.campaign_id ?? (s.level === 'campaign' ? s.entity_id : ''))));

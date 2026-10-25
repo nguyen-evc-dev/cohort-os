@@ -130,3 +130,28 @@ describe('defaultRange', () => {
   it('7 ngày kết thúc ở ngày mới nhất', () => { expect(defaultRange('2026-10-24', 7)).toEqual({ from: '2026-10-18', to: '2026-10-24' }); });
   it('không có dữ liệu → null', () => { expect(defaultRange(null)).toBeNull(); });
 });
+
+describe('stageOverrides (gắn stage thủ công)', () => {
+  const rows = [
+    meta('2026-10-20', AD_VIDEO, { spend: 10, funnel_stage: null }),
+    meta('2026-10-20', AD_PHOTO, { ...photo, spend: 10, funnel_stage: 'TOFU' }),
+  ];
+  it('không có override → giữ stage tự nhận (ad không có từ khóa thì rỗng)', () => {
+    const r = buildProjectReport({ metaRows: rows, campaignIds: [CAMP] });
+    expect(r.concepts.find((c) => c.conceptKey === 'video ban doc')!.stages).toEqual([]);
+    expect(r.concepts.find((c) => c.conceptKey === 'photo poster kv')!.stages).toEqual(['TOFU']);
+  });
+  it('override theo concept gắn nhãn cho concept không có từ khóa', () => {
+    const r = buildProjectReport({ metaRows: rows, campaignIds: [CAMP], stageOverrides: { byConcept: { 'video ban doc': 'MOFU' } } });
+    expect(r.concepts.find((c) => c.conceptKey === 'video ban doc')!.stages).toEqual(['MOFU']);
+    const ad = r.tree[0].children.flatMap((s) => s.children).find((a) => a.id === AD_VIDEO)!;
+    expect(ad.stage).toBe('MOFU');
+  });
+  it('override theo ad thắng override theo concept; override ghi đè cả stage tự nhận', () => {
+    const r = buildProjectReport({ metaRows: rows, campaignIds: [CAMP],
+      stageOverrides: { byConcept: { 'photo poster kv': 'BOFU' }, byAd: { [AD_PHOTO]: 'MOFU' } } });
+    expect(r.concepts.find((c) => c.conceptKey === 'photo poster kv')!.stages).toEqual(['MOFU']);
+    const r2 = buildProjectReport({ metaRows: rows, campaignIds: [CAMP], stageOverrides: { byConcept: { 'photo poster kv': 'BOFU' } } });
+    expect(r2.concepts.find((c) => c.conceptKey === 'photo poster kv')!.stages).toEqual(['BOFU']);
+  });
+});
