@@ -10,3 +10,7 @@ node_modules/
 .next/
 .clasp.json
 .clasprc.json
+
+# Next.js
+next-env.d.ts
+*.tsbuildinfo

@@ -1,0 +1,25 @@
+/* Token theo Design Proposal — Variant A "Iman Dark". Đầy đủ ở T2.1. */
+:root {
+  --bg: #0a0a0a; --surface: #121212; --surface-2: #1a1a1a;
+  --border: #ffffff14; --border-strong: #ffffff29;
+  --text: #fafafa; --muted: #a1a19a; --faint: #6b6b66;
+  --crm: #d0fe16; --meta: #7c8cff; --warn: #f5b83d; --burn: #ff4d4d;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); }
+body { font: 14px/20px 'Be Vietnam Pro', Inter, system-ui, sans-serif; min-height: 100vh; }
+a { color: var(--text); }
+
+.center { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; }
+.card { width: 100%; max-width: 400px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 24px; }
+.brand { font: 700 22px/1.2 Inter, system-ui, sans-serif; letter-spacing: -0.5px; margin: 0 0 4px; }
+.sub { color: var(--muted); margin: 0 0 20px; }
+label { display: block; font: 600 11px/14px Inter, system-ui, sans-serif; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin-bottom: 6px; }
+input { width: 100%; background: var(--surface-2); color: var(--text); border: 1px solid var(--border-strong); border-radius: 6px; padding: 10px 12px; font: inherit; }
+input:focus { outline: 2px solid var(--crm); outline-offset: 1px; }
+button { margin-top: 14px; width: 100%; background: var(--crm); color: #0a0a0a; border: 0; border-radius: 6px; padding: 10px 12px; font: 600 14px Inter, system-ui, sans-serif; cursor: pointer; }
+button.ghost { background: transparent; color: var(--text); border: 1px solid var(--border-strong); }
+.note { color: var(--muted); font-size: 13px; margin-top: 14px; }
+.ok { color: var(--crm); }
+.err { color: var(--burn); }
+.pill { display: inline-block; border: 1px solid var(--border-strong); border-radius: 999px; padding: 0 10px; font-size: 12px; color: var(--muted); }
