@@ -88,7 +88,7 @@ export function DailyChart({ daily, mode, relative = false }: { daily: DayPoint[
   const yC = (v: number) => T + (H - T - B) * (1 - v / maxCost);
   const pts = costs.map((c, i) => (c === null ? null : [x(i), yC(c)] as const));
   const path = pts.reduce<string>((s, p, i) => (p ? `${s}${s && pts[i - 1] ? 'L' : 'M'}${p[0]},${p[1]} ` : s), '');
-  const color = mode === 'crm' ? 'var(--crm)' : 'var(--meta)';
+  const color = 'var(--crm)'; // lime: đường chi phí luôn nổi bật trên nền cột slate
   const step = Math.max(1, Math.ceil(days.length / 8));
   return (
     <div>
@@ -110,8 +110,8 @@ export function DailyChart({ daily, mode, relative = false }: { daily: DayPoint[
           </g>
         ))}
         <defs><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="3" height="6" fill="#7c8cff55" /></pattern></defs>
-        {path && <path d={path} fill="none" stroke={color} strokeWidth={2} />}
-        {pts.map((p, i) => p && <circle key={i} cx={p[0]} cy={p[1]} r={3.5} fill={color}><title>{relative ? days[i].date : `${days[i].date}: ${fmtMoney(costs[i])}`}</title></circle>)}
+        {path && <path d={path} fill="none" stroke={color} strokeWidth={2.5} strokeLinejoin="round" />}
+        {pts.map((p, i) => p && <circle key={i} cx={p[0]} cy={p[1]} r={4} fill={color} stroke="#0a0a0a" strokeWidth={1.5}><title>{relative ? days[i].date : `${days[i].date}: ${fmtMoney(costs[i])}`}</title></circle>)}
       </svg>
       <div className="legend">
         <span><i style={{ background: '#7c8cff55', border: '1px solid #7c8cff' }} />Spend / ngày (Meta)</span>
