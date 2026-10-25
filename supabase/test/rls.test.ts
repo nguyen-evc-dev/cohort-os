@@ -5,6 +5,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import fs from 'node:fs';
+import { buildProjectReport } from '../../packages/core/src/report';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -232,5 +233,72 @@ describe('bot_read (cổng đọc của Bé Sugar qua anon key)', () => {
     const r = await db.query<{ owner: string; secdef: boolean }>(
       `select pg_get_userbyid(proowner) as owner, prosecdef as secdef from pg_proc where proname = 'bot_read'`);
     expect(r.rows).toEqual([{ owner: 'bot_reader', secdef: true }]);
+  });
+});
+
+describe('AC T2.3 — báo cáo Web khớp view bot.v_project_master', () => {
+  it('buildProjectReport(không lọc ngày) = v_project_master cho cùng dữ liệu', async () => {
+    // to_jsonb → dữ liệu dạng chuỗi giống PostgREST (ngày là 'YYYY-MM-DD')
+    const q = (table: string, where = 'true') => db.query<any>(`select to_jsonb(t) as j from public.${table} t where ${where}`).then((r) => r.rows.map((x) => x.j));
+    const [meta, subs, deals, camps] = await Promise.all([
+      q('meta_ads_daily'), q('crm_submissions'),
+      q('crm_deals'), q('project_campaigns', `project_id = '${projectId}'`),
+    ]);
+    const r = buildProjectReport({ metaRows: meta, campaignIds: camps.map((c) => c.campaign_id), submissions: subs, deals });
+    const [m] = await as<any>('bot_reader', 'select * from bot.v_project_master');
+    expect({
+      spend: r.total.meta.spend, registrations: r.total.crm.leads, tracked: r.total.crm.tracked, seats: r.total.crm.seats,
+      seat_revenue: r.total.crm.seatRevenue, programs: r.total.crm.programs, program_revenue: r.total.crm.programRevenue,
+      cpa_seat: r.total.crm.cpaSeat, cash_roas: r.total.crm.cashRoas, purchases_meta: r.total.meta.purchases,
+    }).toEqual({
+      spend: Number(m.spend), registrations: Number(m.registrations), tracked: Number(m.tracked_registrations), seats: Number(m.seats),
+      seat_revenue: Number(m.seat_revenue), programs: Number(m.programs), program_revenue: Number(m.program_revenue),
+      cpa_seat: Number(m.cpa_seat), cash_roas: Number(m.cash_roas), purchases_meta: Number(m.purchases_meta),
+    });
+  });
+});
+
+describe('cổng công khai (thumb_allowed, share_open) — T2.5 / T2.9', () => {
+  const TOKEN = 'A'.repeat(43);
+  const EXPIRED = 'B'.repeat(43);
+  const REVOKED = 'C'.repeat(43);
+  const FILE = '1AbCdEfGhIjKlMnOp';
+  beforeAll(async () => {
+    await db.exec(`
+      insert into public.shares (token, title, snapshot, expires_at, created_at) values
+        ('${TOKEN}', 'Báo cáo thử', '{"spend": 150}', now() + interval '7 days', now()),
+        ('${EXPIRED}', 'Hết hạn', '{}', now() - interval '1 hour', now() - interval '2 days'),
+        ('${REVOKED}', 'Đã thu hồi', '{}', now() + interval '7 days', now());
+      update public.shares set revoked_at = now() where token = '${REVOKED}';
+    `);
+  });
+  const q = (v: string) => v.replace(/'/g, "''"); // escape cho SQL của chính test; hàm DB phải tự an toàn với chuỗi lạ
+  const open = (t: string) => as<{ r: any }>('anon', `select public.share_open('${q(t)}') as r`).then((x) => x[0].r);
+  const thumb = (f: string) => as<{ r: boolean }>('anon', `select public.thumb_allowed('${q(f)}') as r`).then((x) => x[0].r);
+
+  it('thumb_allowed: chỉ true với fileId đã gắn trong creative_assets', async () => {
+    expect(await thumb(FILE)).toBe(true);          // đã gắn ở test "admin ghi được bảng creative"
+    expect(await thumb('1ZzZzZzZzZzZzZzZz')).toBe(false);
+    expect(await thumb("x'; drop table shares; --")).toBe(false);
+  });
+  it('share_open: token đúng → snapshot + tăng view_count', async () => {
+    const r = await open(TOKEN);
+    expect(r).toMatchObject({ title: 'Báo cáo thử', snapshot: { spend: 150 }, hide_money: false });
+    await open(TOKEN);
+    const [row] = await db.query<{ view_count: number }>(`select view_count from public.shares where token = '${TOKEN}'`).then((x) => x.rows);
+    expect(row.view_count).toBe(2);
+  });
+  it('share_open: hết hạn / thu hồi / sai / token ngắn / null → null (không lộ lý do)', async () => {
+    for (const t of [EXPIRED, REVOKED, 'D'.repeat(43), 'ngan', "x'--"]) expect(await open(t)).toBeNull();
+    expect(await as('anon', `select public.share_open(null) as r`)).toEqual([{ r: null }]);
+  });
+  it('anon vẫn KHÔNG đọc trực tiếp shares / creative_assets', async () => {
+    await denied(as('anon', 'select * from public.shares'));
+    await denied(as('anon', 'select * from public.creative_assets'));
+    await denied(as('anon', `update public.shares set revoked_at = null`));
+  });
+  it('hàm chạy bằng role gateway, không phải chủ bảng', async () => {
+    const r = await db.query<{ n: string; o: string }>(`select proname as n, pg_get_userbyid(proowner) as o from pg_proc where proname in ('thumb_allowed','share_open') order by 1`);
+    expect(r.rows).toEqual([{ n: 'share_open', o: 'gateway' }, { n: 'thumb_allowed', o: 'gateway' }]);
   });
 });

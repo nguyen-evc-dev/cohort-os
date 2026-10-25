@@ -24,6 +24,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm check:skills
       - run: pnpm typecheck
       - run: pnpm test
       - name: Test bảo mật (schema + Supabase thật nếu có secret)

@@ -124,7 +124,7 @@ npm run sync:push -- sync/inbox/<TARGET>
 ## 7. Chế độ BACKFILL (chỉ khi người dùng ghi `BACKFILL_DAYS=N`)
 
 - **Bỏ qua gate** (bước 0) nhưng vẫn `cd` vào repo. TARGET = hôm qua theo giờ `America/Los_Angeles`.
-- Chia khoảng [TARGET − N + 1, TARGET] thành các khúc **10 ngày**, cũ nhất trước.
+- Chia khoảng [TARGET − N + 1, TARGET] thành các khúc **5 ngày** (kết quả ad × ngày của 10 ngày dài ~63.000 ký tự và bị lưu thành file thay vì hiện trực tiếp), cũ nhất trước.
 - Mỗi khúc k (1, 2, …): làm 2a + 2b với `time_range` của khúc, ghi vào `sync/inbox/<TARGET>-backfill-<k>/` với `meta.json` có `"mode":"backfill"` và `date_from`/`date_to` của khúc, rồi chạy `npm run sync:push -- sync/inbox/<TARGET>-backfill-<k>`.
 - Chỉ khúc **cuối cùng** làm thêm 2c → 2g (trạng thái hiện tại).
 - Một khúc bị từ chối → xử lý như mục 4; vẫn lỗi thì dừng và báo khúc nào lỗi.

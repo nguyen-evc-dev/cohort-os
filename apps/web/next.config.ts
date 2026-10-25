@@ -2,6 +2,8 @@ import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  experimental: { serverActions: { bodySizeLimit: '6mb' } }, // import CRM: vài nghìn dòng ID đã làm sạch
+  transpilePackages: ['@cohort/core'], // core xuất thẳng TypeScript
   async headers() {
     return [{
       source: '/:path*',

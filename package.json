@@ -4,7 +4,9 @@
   "version": "0.1.0",
   "description": "Cohort OS v3 (personal) — Meta Ads + HubSpot master report, Bé Sugar",
   "packageManager": "pnpm@12.15.0",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "test": "pnpm -r --if-present test",
     "typecheck": "pnpm -r --if-present typecheck",
@@ -12,7 +14,9 @@
     "sync:gate": "tsx apps/sync/src/cli/gate.ts",
     "sync:verify": "tsx apps/sync/src/cli/verify.ts",
     "sync:push": "tsx apps/sync/src/cli/push.ts",
-    "bot:token": "tsx apps/sync/src/cli/bot-token.ts"
+    "bot:token": "tsx apps/sync/src/cli/bot-token.ts",
+    "build:skills": "node scripts/build-skills.mjs",
+    "check:skills": "node scripts/build-skills.mjs --check"
   },
   "devDependencies": {
     "tsx": "^4.20.0"

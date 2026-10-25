@@ -11,8 +11,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@cohort/core": "workspace:*",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.118.0",
+    "html-to-image": "^1.11.13",
     "next": "^16.4.3",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
