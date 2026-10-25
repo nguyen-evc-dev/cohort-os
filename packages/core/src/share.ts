@@ -26,6 +26,7 @@ function stripMoney(m: Metrics): void {
   for (const k of ['spend', 'cpm', 'cpl', 'cpaMeta']) meta[k] = null;
   const crm = m.crm as unknown as Record<string, number | null>;
   for (const k of ['seatRevenue', 'programRevenue', 'revenue', 'cpaSeat']) crm[k] = null;
+  for (const s of Object.values(m.steps ?? {})) { (s as { cost: number | null }).cost = null; (s as unknown as { value: number | null }).value = null; }
 }
 
 /** Spend theo ngày → chỉ số tương đối (ngày cao nhất = 100) để biểu đồ vẫn có hình dạng mà không lộ số tiền. */
@@ -41,7 +42,10 @@ export function hideMoneyInReport(report: ProjectReport): ProjectReport {
   const walk = (nodes: ReportNode[]) => nodes.forEach((n) => { stripMoney(n); walk(n.children); });
   walk(r.tree);
   r.concepts.forEach((c: ConceptRow) => { stripMoney(c); c.cpaReal = null; });
-  r.primary = { ...r.primary, cost: null };
+  r.primary = { ...r.primary, cost: null, target: null };
+  r.final = { ...r.final, cost: null, value: null as unknown as number };
+  r.steps = r.steps.map((s) => ({ ...s, cost: null, value: null as unknown as number }));
+  r.goal = { ...r.goal, target_cost: null, steps: r.goal.steps.map((s) => ({ ...s, value: null })) };
   r.daily = indexDaily(r.daily);
   return r;
 }

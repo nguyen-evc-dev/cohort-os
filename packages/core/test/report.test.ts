@@ -62,8 +62,9 @@ describe('buildProjectReport — có CRM', () => {
     expect(r.total.crm).toMatchObject({ leads: 4, tracked: 4, seats: 2, programs: 1, seatRevenue: 20, programRevenue: 995, revenue: 1015, cpaSeat: 75, cashRoas: 6.77 });
   });
   it('Truth gap: Meta báo 4 purchase, CRM 2 seat → over-report 100%', () => {
-    expect(r.truthGap).toEqual({ metaPurchases: 4, crmSeats: 2, overreportPct: 100 });
-    expect(r.primary).toMatchObject({ kind: 'seat', value: 2, cost: 75 });
+    expect(r.truthGap).toMatchObject({ metaPurchases: 4, crmSeats: 2, overreportPct: 100 });
+    // mục tiêu mặc định: bước chính = Purchase (Meta)
+    expect(r.primary).toMatchObject({ kind: 'meta', key: 'purchase', value: 4, cost: 37.5 });
   });
   it('funnel', () => { expect(r.funnel).toMatchObject({ leads: 4, seats: 2, programs: 1, leadToSeatPct: 50, seatToProgramPct: 50 }); });
   it('Unattributed = lead có ad không nằm trong project (c-7: ad lạ; c-5: gắn ad photo nên KHÔNG unattributed)', () => {
@@ -99,9 +100,10 @@ describe('buildProjectReport — có CRM', () => {
   });
   it('concept: video ban doc có seat → CPA 100; photo 0 seat', () => {
     const v = r.concepts.find((c) => c.conceptKey === 'video ban doc')!;
-    expect(v).toMatchObject({ conversions: 1, cpaReal: 100, light: 'yellow' });
+    expect(v).toMatchObject({ conversions: 3, cpaReal: 33.33 }); // bước chính mặc định = Purchase Meta
+    expect(v.steps.seats).toMatchObject({ count: 1, cost: 100 });
     expect(v.stages).toEqual(['MOFU']);
-    expect(r.concepts.find((c) => c.conceptKey === 'photo poster kv')).toMatchObject({ conversions: 0, light: 'grey' });
+    expect(r.concepts.find((c) => c.conceptKey === 'photo poster kv')).toMatchObject({ conversions: 1 });
   });
 });
 

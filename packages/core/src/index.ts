@@ -8,6 +8,7 @@ export * from './ryg';
 export * from './mask';
 export * from './time';
 export * from './hubspot';
+export * from './goal';
 export * from './report';
 export * from './hubspot-import';
 export * from './crm-payload';
