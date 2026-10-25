@@ -10,8 +10,10 @@ import { fileURLToPath } from 'node:url';
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 // Schema bot được tạo sẵn cho role mô phỏng (PGlite không cấp được quyền CREATE trên database) → bỏ dòng tạo schema khi test.
-const MIGRATION = fs.readFileSync(path.join(dir, '..', 'migrations', '20261025000000_init.sql'), 'utf8')
-  .replace('create schema if not exists bot;', '');
+const MIGRATIONS_DIR = path.join(dir, '..', 'migrations');
+const MIGRATIONS = fs.readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith('.sql')).sort()
+  .map((f) => fs.readFileSync(path.join(MIGRATIONS_DIR, f), 'utf8').replace('create schema if not exists bot;', ''));
+export const BOT_TOKEN = 'test-bot-token-0123456789abcdefghijklmnop';
 
 const ADMIN = '11111111-1111-1111-1111-111111111111';
 const STRANGER = '22222222-2222-2222-2222-222222222222';
@@ -51,7 +53,9 @@ beforeAll(async () => {
     alter schema public owner to supa_postgres;
   `);
   // Chạy migration bằng role không phải superuser để bắt lỗi quyền giống Supabase thật
-  await db.transaction(async (tx) => { await tx.exec("set local role supa_postgres"); await tx.exec(MIGRATION); });
+  for (const m of MIGRATIONS) {
+    await db.transaction(async (tx) => { await tx.exec('set local role supa_postgres'); await tx.exec(m); });
+  }
   await db.exec(`grant all on all tables in schema public to service_role;`);
 
   // Dữ liệu mẫu (nạp bằng superuser = giống service_role của sync)
@@ -75,6 +79,13 @@ beforeAll(async () => {
       ('66000000001', '${projectId}', '{257000000001}', 'Following', 'seat', 10, true),
       ('66000000002', '${projectId}', '{257000000002}', 'Lost', 'seat', 10, false),
       ('66000000003', '${projectId}', '{257000000003}', 'Purchased', 'program', 995, true);
+    insert into public.sync_runs (kind, target_date, status, rows, problems) values
+      ('meta', '2026-10-20', 'ok', 2, null),
+      ('meta', '2026-10-21', 'rejected', 0, '[{"date":"2026-10-21","ads_spend":90,"account_spend":100}]');
+    insert into public.bot_tokens (token_hash, label) values
+      (encode(sha256(convert_to('${BOT_TOKEN}', 'UTF8')), 'hex'), 'test'),
+      (encode(sha256(convert_to('revoked-token-0123456789abcdefghijklmnop', 'UTF8')), 'hex'), 'old');
+    update public.bot_tokens set revoked_at = now() where label = 'old';
   `);
 });
 
@@ -190,5 +201,36 @@ describe('ràng buộc dữ liệu (chặn PII lọt vào bằng cột sai đị
     [`insert into public.shares (token, title, snapshot, expires_at) values ('ngan', 't', '{}', now() + interval '1 day')`, 'token share quá ngắn'],
   ])('%s → bị từ chối (%s)', async (sql) => {
     await expect(db.exec(sql.replace('$P', projectId))).rejects.toThrow(/violates check constraint/);
+  });
+});
+
+describe('bot_read (cổng đọc của Bé Sugar qua anon key)', () => {
+  const call = (token: string, view: string, since: string | null = null) =>
+    as<{ r: any }>('anon', `select public.bot_read(${token === null ? 'null' : `'${token}'`}, '${view}', ${since ? `'${since}'` : 'null'}) as r`);
+  it('token đúng → đọc được view trạng thái sync, mới nhất trước', async () => {
+    const [{ r }] = await call(BOT_TOKEN, 'v_sync_status');
+    expect(r.map((x: any) => [x.target_date, x.status])).toEqual([['2026-10-21', 'rejected'], ['2026-10-20', 'ok']]);
+  });
+  it('lọc theo ngày (p_since)', async () => {
+    const [{ r }] = await call(BOT_TOKEN, 'v_campaign_daily', '2026-10-21');
+    expect(r).toEqual([]);
+    const [{ r: all }] = await call(BOT_TOKEN, 'v_campaign_daily', '2026-10-20');
+    expect(all.length).toBe(1);
+  });
+  it.each([['sai', 'abcdefghijklmnopqrstuvwxyz0123456789'], ['ngắn', 'x'], ['đã thu hồi', 'revoked-token-0123456789abcdefghijklmnop']])(
+    'token %s → unauthorized', async (_n, t) => { await expect(call(t, 'v_sync_status')).rejects.toThrow(/unauthorized/); });
+  it('chỉ đọc view trong whitelist, không đọc bảng / view nội bộ', async () => {
+    for (const v of ['_leads', '_lead_outcomes', 'crm_submissions', 'v_sync_status; drop table x']) {
+      await expect(call(BOT_TOKEN, v)).rejects.toThrow(/unknown_view/);
+    }
+  });
+  it('anon không đọc được bot_tokens; authenticated không gọi được bot_read', async () => {
+    await denied(as('anon', 'select * from public.bot_tokens'));
+    await denied(as('authenticated', `select public.bot_read('${BOT_TOKEN}', 'v_sync_status')`, ADMIN));
+  });
+  it('hàm chạy bằng quyền bot_reader (không phải chủ bảng)', async () => {
+    const r = await db.query<{ owner: string; secdef: boolean }>(
+      `select pg_get_userbyid(proowner) as owner, prosecdef as secdef from pg_proc where proname = 'bot_read'`);
+    expect(r.rows).toEqual([{ owner: 'bot_reader', secdef: true }]);
   });
 });

@@ -3,9 +3,17 @@
   "private": true,
   "version": "0.1.0",
   "description": "Cohort OS v3 (personal) — Meta Ads + HubSpot master report, Bé Sugar",
+  "packageManager": "pnpm@12.15.0",
   "engines": { "node": ">=22" },
   "scripts": {
     "test": "pnpm -r --if-present test",
-    "typecheck": "pnpm -r --if-present typecheck"
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test:security": "pnpm --filter @cohort/db test:security",
+    "sync:gate": "tsx apps/sync/src/cli/gate.ts",
+    "sync:push": "tsx apps/sync/src/cli/push.ts",
+    "bot:token": "tsx apps/sync/src/cli/bot-token.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.0"
   }
 }

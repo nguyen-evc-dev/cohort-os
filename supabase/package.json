@@ -4,10 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:security": "vitest run test/rls.test.ts test/live-security.test.ts"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.3.11",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "@types/node": "^22.18.0"
   }
 }
