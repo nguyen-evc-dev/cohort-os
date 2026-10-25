@@ -9,7 +9,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
-const MIGRATION = fs.readFileSync(path.join(dir, '..', 'migrations', '20261025000000_init.sql'), 'utf8');
+// Schema bot được tạo sẵn cho role mô phỏng (PGlite không cấp được quyền CREATE trên database) → bỏ dòng tạo schema khi test.
+const MIGRATION = fs.readFileSync(path.join(dir, '..', 'migrations', '20261025000000_init.sql'), 'utf8')
+  .replace('create schema if not exists bot;', '');
 
 const ADMIN = '11111111-1111-1111-1111-111111111111';
 const STRANGER = '22222222-2222-2222-2222-222222222222';
@@ -43,8 +45,13 @@ beforeAll(async () => {
       as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
     grant usage on schema auth to public;
     grant usage on schema public to anon, authenticated, service_role;
+    -- Mô phỏng role "postgres" của Supabase: KHÔNG phải superuser, KHÔNG bypassrls, có CREATEROLE.
+    create role supa_postgres nologin createrole;
+    create schema bot authorization supa_postgres; -- Supabase: role postgres tự tạo được schema; PGlite không cấp được quyền trên database
+    alter schema public owner to supa_postgres;
   `);
-  await db.exec(MIGRATION);
+  // Chạy migration bằng role không phải superuser để bắt lỗi quyền giống Supabase thật
+  await db.transaction(async (tx) => { await tx.exec("set local role supa_postgres"); await tx.exec(MIGRATION); });
   await db.exec(`grant all on all tables in schema public to service_role;`);
 
   // Dữ liệu mẫu (nạp bằng superuser = giống service_role của sync)

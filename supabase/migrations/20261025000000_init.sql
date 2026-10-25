@@ -322,6 +322,8 @@ grant select on public.crm_leads to authenticated;
 create schema if not exists bot;
 revoke all on schema bot from public, anon, authenticated;
 grant usage on schema bot to bot_owner, bot_reader;
+-- Postgres chỉ cho đổi owner view sang role có quyền CREATE trên schema → cấp tạm, thu hồi ngay sau khi đổi owner.
+grant create on schema bot to bot_owner;
 grant usage on schema public to bot_owner;
 
 do $$
@@ -417,5 +419,7 @@ begin
     execute format('grant select on bot.%I to bot_reader', v);
   end loop;
 end $$;
+
+revoke create on schema bot from bot_owner;
 
 comment on schema bot is 'View tổng hợp cho Bé Sugar. Không chứa contact_id/deal_id. Đọc bằng role bot_reader.';
