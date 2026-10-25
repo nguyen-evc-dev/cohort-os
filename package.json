@@ -1,0 +1,11 @@
+{
+  "name": "cohort-os",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Cohort OS v3 (personal) — Meta Ads + HubSpot master report, Bé Sugar",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "pnpm -r --if-present test",
+    "typecheck": "pnpm -r --if-present typecheck"
+  }
+}

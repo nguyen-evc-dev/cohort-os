@@ -1,0 +1,7 @@
+packages:
+  - "packages/*"
+  - "apps/*"
+
+# Chỉ cho phép script cài đặt của các gói đã duyệt (pnpm mặc định chặn).
+allowBuilds:
+  esbuild: true

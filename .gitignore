@@ -1,0 +1,12 @@
+# Secret — KHÔNG BAO GIỜ đưa lên GitHub
+.env.local
+.env*.local
+# File export HubSpot và dữ liệu thô của agent (có thể chứa PII hoặc số chưa kiểm tra)
+*.csv
+*.xlsx
+sync/inbox/
+# Công cụ
+node_modules/
+.next/
+.clasp.json
+.clasprc.json
