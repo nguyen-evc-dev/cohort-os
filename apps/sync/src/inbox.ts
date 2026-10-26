@@ -9,13 +9,17 @@
  *   campaigns.json   [campaign]   adsets.json [adset]   ads_status.json [ad, số 7 ngày]
  *   creatives.json   [{ ad_id, creative_id, title, body, link_url, call_to_action_type, thumbnail_url }]
  *   activity.json    [activity log, đã bỏ actor_*]
+ *   customconversions.json [{ id, name, custom_event_type, is_archived, last_fired_time, default_conversion_value }]
+ *
+ * Chuyển đổi (custom conversion, pixel event, video_view) không có field đếm riêng trong connector: agent chép
+ * `cost_per_action_type:<loại>` và script suy ra số lượng = spend / cost (làm tròn; lệch quá 2% thì bỏ).
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { num, type Row } from '@cohort/core';
 
 export const INBOX_FILES = ['meta.json', 'ads.json', 'account.json', 'campaigns.json', 'adsets.json',
-  'ads_status.json', 'creatives.json', 'activity.json'] as const;
+  'ads_status.json', 'creatives.json', 'activity.json', 'customconversions.json'] as const;
 const REQUIRED = ['meta.json', 'ads.json', 'account.json'];
 
 export interface RunMeta { mode: 'daily' | 'backfill'; account_id: string; date_from: string; date_to: string; run_started_at?: string }
@@ -28,11 +32,42 @@ export interface Batch {
   creatives: Row[];     // dòng meta_creatives
   activity: Row[];      // { object_id, event_type, datetime_raw, old_value, new_value }
   targetingByAdset: Record<string, unknown>;
+  /** { date, ad_id, campaign_id, action_type, count } suy ra từ cost_per_action_type */
+  actionRows: Row[];
+  /** Tổng chuyển đổi tài khoản theo ngày (để đối chiếu): date → action_type → count */
+  checkActions: Record<string, Record<string, number>>;
+  customConversions: Row[];
   problems: { file: string; reason: string; detail?: unknown }[];
 }
 
 const ID_RE = /^\d{6,25}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Loại hành động cần giữ: custom conversion, pixel event chuẩn, lead, video_view (lượt xem 3 giây). */
+export const KEEP_ACTION = /^(offsite_conversion\.custom\.\d{6,25}|offsite_conversion\.fb_pixel_[a-z_]{2,40}|video_view|lead|onsite_conversion\.lead_grouped)$/;
+
+/** Đọc chi phí theo loại hành động: khóa phẳng "cost_per_action_type:<loại>", object, hoặc mảng { action_type, value }. */
+export function costPerActions(r: Row): Record<string, number> {
+  const out: Record<string, number> = {};
+  const put = (type: string, v: unknown) => { const x = money(v); if (KEEP_ACTION.test(type) && x > 0) out[type] = x; };
+  for (const [k, v] of Object.entries(r)) if (k.startsWith('cost_per_action_type:')) put(k.slice('cost_per_action_type:'.length), v);
+  const nested = r.cost_per_action_type;
+  if (Array.isArray(nested)) for (const it of nested) put(String(it?.action_type ?? ''), it?.value);
+  else if (nested && typeof nested === 'object') for (const [k, v] of Object.entries(nested)) put(k, v);
+  return out;
+}
+
+/** Số lượng = spend / cost. Chỉ nhận khi kết quả gần số nguyên (lệch ≤ 2%) để không suy ra số sai từ dữ liệu chép lỗi. */
+export function deriveCounts(spend: number, costs: Record<string, number>): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!(spend > 0)) return out;
+  for (const [type, cost] of Object.entries(costs)) {
+    const raw = spend / cost;
+    const c = Math.round(raw);
+    if (c >= 1 && Math.abs(raw - c) <= Math.max(0.05, c * 0.02)) out[type] = c;
+  }
+  return out;
+}
 
 /** {"value":"19.36","unit":"USD"} | "19.36" | 19.36 | null → số. */
 export function money(v: unknown): number {
@@ -89,6 +124,7 @@ export function readInbox(dir: string): Batch {
   const adsStatus = readJson(dir, 'ads_status.json', problems) as Row[];
   const creatives = readJson(dir, 'creatives.json', problems) as Row[];
   const activity = readJson(dir, 'activity.json', problems) as Row[];
+  const customs = readJson(dir, 'customconversions.json', problems) as Row[];
 
   const m: RunMeta = {
     mode: meta?.mode === 'backfill' ? 'backfill' : 'daily',
@@ -104,6 +140,7 @@ export function readInbox(dir: string): Batch {
 
   // Dòng ad: bỏ dòng không có id (connector trả dòng rỗng cho ngày spend = 0)
   const adRows: Row[] = [];
+  const actionRows: Row[] = [];
   for (const r of ads) {
     if (!r || !r.id) continue;
     const date = str(r.date_start);
@@ -117,12 +154,29 @@ export function readInbox(dir: string): Batch {
       spend: money(r.amount_spent), impressions: num(r.impressions), reach: num(r.reach), frequency: num(r.frequency),
       link_clicks: num(r.link_click), link_ctr: num(r.website_ctr), cpm: money(r.cpm), leads: num(r.lead),
       purchases: num(r.omni_purchase), landing_page_views: num(r.landing_page_view), thruplay: num(r.video_thruplay_watched_actions),
+      outbound_clicks: num(r.outbound_clicks), video_3s: 0,
     });
+    const counts = deriveCounts(money(r.amount_spent), costPerActions(r));
+    adRows[adRows.length - 1].video_3s = counts.video_view || 0;
+    for (const [action_type, count] of Object.entries(counts)) {
+      if (action_type !== 'video_view') actionRows.push({ date, ad_id: str(r.id), campaign_id: str(r.campaign_id), action_type, count });
+    }
   }
 
   const checkRows = account
     .filter((r) => r && DATE_RE.test(str(r.date_start)))
     .map((r) => ({ date: str(r.date_start), account_spend: money(r.amount_spent) }));
+  const checkActions: Record<string, Record<string, number>> = {};
+  for (const r of account) if (r && DATE_RE.test(str(r.date_start))) checkActions[str(r.date_start)] = deriveCounts(money(r.amount_spent), costPerActions(r));
+
+  const customConversions: Row[] = [];
+  for (const c of customs) {
+    if (!c || !ID_RE.test(str(c.id)) || !str(c.name)) continue;
+    const fired = str(c.last_fired_time);
+    customConversions.push({ id: str(c.id), name: str(c.name).slice(0, 200), event_type: str(c.custom_event_type).slice(0, 40) || null,
+      is_archived: c.is_archived === true || c.is_archived === 'true', last_fired_at: fired && !Number.isNaN(Date.parse(fired)) ? new Date(fired).toISOString() : null,
+      default_value: c.default_conversion_value === undefined || c.default_conversion_value === null ? null : num(c.default_conversion_value) });
+  }
 
   const targetingByAdset: Record<string, unknown> = {};
   const entities: Row[] = [];
@@ -168,5 +222,5 @@ export function readInbox(dir: string): Batch {
       datetime_raw: str(a.datetime ?? a.datetime_raw), ...activityValues(a.extra_data) });
   }
 
-  return { dir, meta: m, adRows, checkRows, entities, creatives: creativeRows, activity: activityRows, targetingByAdset, problems };
+  return { dir, meta: m, adRows, checkRows, entities, creatives: creativeRows, activity: activityRows, targetingByAdset, actionRows, checkActions, customConversions, problems };
 }

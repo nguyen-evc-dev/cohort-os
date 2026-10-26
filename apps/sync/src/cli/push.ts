@@ -24,7 +24,8 @@ const res = await pushBatch(SupabaseStore.fromEnv(), batch, { accountId: process
 console.log(`STATUS ${res.status.toUpperCase()} · ngày ${batch.meta.date_from} → ${res.targetDate} · run ${res.runId}`);
 console.log(`Spend tài khoản theo ngày: ${Object.entries(res.spendByDate).map(([d, v]) => `${d} $${v}`).join(' · ')}`);
 if (res.status === 'ok') {
-  console.log(`Đã ghi: ${res.rows.ads_daily} dòng ad×ngày · ${res.rows.entities} entity · ${res.rows.creatives} creative · ${res.rows.budget_events} lần đổi budget · ${res.rows.signals} tín hiệu`);
+  console.log(`Đã ghi: ${res.rows.ads_daily} dòng ad×ngày · ${res.rows.entities} entity · ${res.rows.creatives} creative · ${res.rows.budget_events} lần đổi budget · ${res.rows.signals} tín hiệu · ${res.rows.actions} dòng chuyển đổi · ${res.rows.custom_conversions} custom conversion`);
+  for (const w of res.warnings) console.log(`⚠ ${w}`);
   const removed = cleanupInbox(INBOX_ROOT, syncWindow(new Date(), tz).targetDate);
   if (removed.length) console.log(`Đã xóa inbox cũ: ${removed.join(', ')}`);
 } else if (res.status === 'rejected') {

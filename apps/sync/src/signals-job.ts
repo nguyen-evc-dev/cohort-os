@@ -1,8 +1,8 @@
 /** Tính lại toàn bộ tín hiệu (đèn RYG) cho ngày as_of từ dữ liệu trong DB. */
 import {
-  addDays, buildCampaignContexts, computeSignals, hoursBetween, num, signalColor, type Config, type Row,
+  addDays, buildCampaignContexts, computeSignals, hoursBetween, num, readGoal, signalColor, type Config, type Row,
 } from '@cohort/core';
-import type { Store } from './store';
+import { isMissingSchema, type Store } from './store';
 
 const nullsToEmpty = (r: Row): Row => {
   const out: Row = {};
@@ -39,6 +39,8 @@ export function seatsByAdDate(submissions: Row[], deals: Row[]): Row[] {
 export async function recomputeSignals(store: Store, asOf: string, config: Config, nowIso: string): Promise<Row[]> {
   const metaRows = (await store.select('meta_ads_daily', { gte: ['date', addDays(asOf, -60)] }))
     .filter((r) => String(r.date) <= asOf);
+  // Campaign thuộc Project có mục tiêu: đo bằng bước chính (custom conversion) thay cho Lead của Meta
+  try { await applyGoalConversions(store, metaRows, addDays(asOf, -60)); } catch (e) { if (!isMissingSchema(e)) throw e; }
   const entities = (await store.select('meta_entities')).map(nullsToEmpty);
   const projectByCampaign = new Map((await store.select('project_campaigns')).map((p) => [String(p.campaign_id), p.project_id]));
   const [subs, deals, imports] = await Promise.all([
@@ -72,4 +74,29 @@ export async function recomputeSignals(store: Store, asOf: string, config: Confi
   const out = [...rows.values()];
   await store.replaceSignals(asOf, out);
   return out;
+}
+
+/** Thay leads_meta bằng số chuyển đổi của bước chính (nếu bước chính là hành động Meta) cho campaign thuộc Project có mục tiêu. */
+export async function applyGoalConversions(store: Store, metaRows: Row[], from: string): Promise<void> {
+  const projects = await store.select('projects');
+  const primaryByProject = new Map<string, string>();
+  for (const p of projects) {
+    const g = readGoal(p.goal);
+    const step = g?.steps.find((s) => s.key === g.primary);
+    if (step?.source === 'meta' && step.action_type) primaryByProject.set(String(p.id), step.action_type);
+  }
+  if (!primaryByProject.size) return;
+  const actionByCampaign = new Map<string, string>();
+  for (const pc of await store.select('project_campaigns')) {
+    const a = primaryByProject.get(String(pc.project_id));
+    if (a) actionByCampaign.set(String(pc.campaign_id), a);
+  }
+  const actions = [...actionByCampaign.values()].some((a) => !a.startsWith('col.')) ? await store.select('meta_actions_daily', { gte: ['date', from] }) : [];
+  const idx = new Map<string, number>();
+  for (const a of actions) idx.set(`${a.date}|${a.ad_id}|${a.action_type}`, num(a.count));
+  for (const r of metaRows) {
+    const a = actionByCampaign.get(String(r.campaign_id));
+    if (!a) continue;
+    r.leads_meta = a.startsWith('col.') ? num(r[a.slice(4)]) : (idx.get(`${r.date}|${r.ad_id}|${a}`) || 0);
+  }
 }

@@ -8,7 +8,7 @@ import {
   type Config, type Row,
 } from '@cohort/core';
 import type { Batch } from './inbox';
-import type { Store } from './store';
+import { isMissingSchema, type Store } from './store';
 import { recomputeSignals } from './signals-job';
 
 export interface PushOptions { now?: Date; accountId?: string; tz?: string }
@@ -17,7 +17,8 @@ export interface PushResult {
   runId: string;
   targetDate: string;
   problems: unknown[];
-  rows: { ads_daily: number; entities: number; creatives: number; budget_events: number; signals: number };
+  rows: { ads_daily: number; entities: number; creatives: number; budget_events: number; signals: number; actions: number; custom_conversions: number };
+  warnings: string[];
   spendByDate: Record<string, number>;
   note?: string;
 }
@@ -56,7 +57,8 @@ export function checkBatch(batch: Batch, config: Config, accountId?: string): un
 export function toDailyRows(batch: Batch, accountId: string, nowIso: string, ptToday: string): Row[] {
   return batch.adRows.map((r) => {
     const d = importAdRowToDaily(r, accountId, nowIso);
-    delete d.video_3s;
+    d.video_3s = Math.round(Number(r.video_3s) || 0);
+    d.outbound_clicks = Math.round(Number(r.outbound_clicks) || 0);
     for (const c of INT_COLS) d[c] = Math.round(Number(d[c]) || 0);
     const parsed = parseAdName(r.ad_name);
     return {
@@ -100,6 +102,21 @@ export function toBudgetEvents(batch: Batch, tz: string): Row[] {
   return [...out.values()];
 }
 
+/** Cảnh báo (không chặn): tổng chuyển đổi theo ad lệch tổng tài khoản > max(1, 5%). */
+export function checkActionTotals(batch: Batch): string[] {
+  const out: string[] = [];
+  const sum: Record<string, Record<string, number>> = {};
+  for (const a of batch.actionRows) { const d = (sum[a.date] ||= {}); d[a.action_type] = (d[a.action_type] || 0) + Number(a.count); }
+  for (const [date, acc] of Object.entries(batch.checkActions)) {
+    for (const [type, total] of Object.entries(acc)) {
+      if (type === 'video_view') continue;
+      const got = sum[date]?.[type] || 0;
+      if (Math.abs(got - total) > Math.max(1, total * 0.05)) out.push(`${date} ${type}: ads ${got} vs tài khoản ${total}`);
+    }
+  }
+  return out.slice(0, 10);
+}
+
 export async function loadConfig(store: Store): Promise<Config> {
   const rows = await store.select('app_config');
   return mergeWithDefaultConfig(parseConfigRows(rows as any));
@@ -114,7 +131,8 @@ export async function pushBatch(store: Store, batch: Batch, opts: PushOptions = 
   const ptToday = addDays(syncWindow(now, tz).targetDate, 1);
   const spendByDate: Record<string, number> = {};
   for (const c of batch.checkRows) spendByDate[c.date] = round2(c.account_spend) as number;
-  const rows = { ads_daily: 0, entities: 0, creatives: 0, budget_events: 0, signals: 0 };
+  const rows = { ads_daily: 0, entities: 0, creatives: 0, budget_events: 0, signals: 0, actions: 0, custom_conversions: 0 };
+  const warnings: string[] = [];
 
   const runId = await store.startRun(batch.meta.mode === 'backfill' ? 'meta_backfill' : 'meta', targetDate);
   try {
@@ -123,7 +141,7 @@ export async function pushBatch(store: Store, batch: Batch, opts: PushOptions = 
     if (problems.length) {
       await store.finishRun(runId, { status: 'rejected', rows: 0, problems: problems.slice(0, 50),
         date_from: batch.meta.date_from || undefined, date_to: batch.meta.date_to || undefined });
-      return { status: 'rejected', runId, targetDate, problems, rows, spendByDate };
+      return { status: 'rejected', runId, targetDate, problems, rows, spendByDate, warnings };
     }
 
     const daily = toDailyRows(batch, accountId, nowIso, ptToday);
@@ -133,7 +151,24 @@ export async function pushBatch(store: Store, batch: Batch, opts: PushOptions = 
     const creatives = batch.creatives.map((c) => ({ ...c, fetched_at: nowIso }));
     const events = toBudgetEvents(batch, tz);
 
-    await store.upsert('meta_ads_daily', daily, 'date,ad_id');
+    try { await store.upsert('meta_ads_daily', daily, 'date,ad_id'); }
+    catch (e) {
+      if (!isMissingSchema(e)) throw e;
+      // DB chưa có cột video_3s / outbound_clicks (chưa đẩy migration conversion_goals) → ghi phần cũ
+      await store.upsert('meta_ads_daily', daily.map(({ video_3s: _v, outbound_clicks: _o, ...rest }) => rest), 'date,ad_id');
+      warnings.push('DB chưa có migration conversion_goals: bỏ qua video_3s, outbound_clicks, chuyển đổi custom. Chạy npx supabase db push --linked');
+    }
+    if (!warnings.length) {
+      try {
+        await store.replaceActions(batch.meta.date_from, batch.meta.date_to, batch.actionRows);
+        rows.actions = batch.actionRows.length;
+        if (batch.customConversions.length) { await store.upsert('meta_custom_conversions', batch.customConversions.map((c) => ({ ...c, seen_at: nowIso })), 'id'); rows.custom_conversions = batch.customConversions.length; }
+      } catch (e) {
+        if (!isMissingSchema(e)) throw e;
+        warnings.push('DB chưa có bảng meta_actions_daily: chạy npx supabase db push --linked');
+      }
+    }
+    warnings.push(...checkActionTotals(batch));
     if (entities.length) await store.upsert('meta_entities', entities, 'level,id');
     if (creatives.length) await store.upsert('meta_creatives', creatives, 'ad_id');
     if (events.length) await store.upsert('meta_budget_events', events, 'object_id,event_time,event_type');
@@ -144,11 +179,11 @@ export async function pushBatch(store: Store, batch: Batch, opts: PushOptions = 
     rows.signals = signals.length;
 
     await store.finishRun(runId, { status: 'ok', rows: daily.length, date_from: batch.meta.date_from, date_to: batch.meta.date_to,
-      note: `entities=${entities.length} creatives=${creatives.length} budget_events=${events.length} signals=${signals.length}` });
-    return { status: 'ok', runId, targetDate, problems: [], rows, spendByDate };
+      note: `entities=${entities.length} creatives=${creatives.length} budget_events=${events.length} actions=${rows.actions} signals=${signals.length}${warnings.length ? ` · ⚠ ${warnings.join(' | ')}` : ''}`.slice(0, 1000) });
+    return { status: 'ok', runId, targetDate, problems: [], rows, spendByDate, warnings };
   } catch (e) {
     const note = String((e as Error).message || e).slice(0, 900);
     await store.finishRun(runId, { status: 'error', note }).catch(() => {});
-    return { status: 'error', runId, targetDate, problems: [], rows, spendByDate, note };
+    return { status: 'error', runId, targetDate, problems: [], rows, spendByDate, warnings, note };
   }
 }

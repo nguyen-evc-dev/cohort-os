@@ -16,6 +16,7 @@ Mở `C:\Users\ADMIN\.claude\settings.json` bằng Notepad. Trong `"permissions"
       "mcp__005631b9-1fb7-466c-9021-3f0c6f0e81e0__ads_get_ad_entities",
       "mcp__005631b9-1fb7-466c-9021-3f0c6f0e81e0__ads_account_get_activity_logs",
       "mcp__005631b9-1fb7-466c-9021-3f0c6f0e81e0__ads_get_creatives",
+      "mcp__005631b9-1fb7-466c-9021-3f0c6f0e81e0__ads_get_customconversions",
       "Bash(cd \"D:/VIBE CODE/Cohort OS/cohort-os\")",
       "Bash(npm run sync:gate)",
       "Bash(npm run sync:push -- sync/inbox/*)",
@@ -23,6 +24,6 @@ Mở `C:\Users\ADMIN\.claude\settings.json` bằng Notepad. Trong `"permissions"
     ],
 ```
 
-- 5 dòng đầu chỉ là tool **đọc** của Meta. 39 tool ghi vẫn nằm trong `deny`, và `deny` luôn thắng `allow`.
+- 6 dòng đầu chỉ là tool **đọc** của Meta (dòng thứ 6 `ads_get_customconversions` thêm ngày 26/10: đọc danh mục custom conversion). 39 tool ghi vẫn nằm trong `deny`, và `deny` luôn thắng `allow`.
 - Không thêm tool Meta nào khác vào `allow`.
 - Không dán cũng được: lần **Run now** đầu tiên, Claude sẽ hỏi quyền, anh bấm **Always allow** cho đúng các mục trên. Quyền đó được lưu riêng cho task.

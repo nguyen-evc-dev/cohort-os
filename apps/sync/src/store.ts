@@ -15,7 +15,12 @@ export interface Store {
   upsert(table: string, rows: Row[], onConflict: string): Promise<void>;
   /** Xóa tín hiệu của ngày as_of rồi ghi lại (tính lại toàn bộ). */
   replaceSignals(asOf: string, rows: Row[]): Promise<void>;
+  /** Xóa chuyển đổi trong [from, to] rồi ghi lại (chuyển đổi có thể giảm khi Meta điều chỉnh attribution). */
+  replaceActions(from: string, to: string, rows: Row[]): Promise<void>;
 }
+
+/** Lỗi do DB chưa có bảng / cột mới (migration chưa đẩy). */
+export const isMissingSchema = (e: unknown) => /does not exist|schema cache|Could not find the .* (column|table)/i.test(String((e as Error)?.message ?? e));
 
 const PAGE = 1000;
 const CHUNK = 500;
@@ -70,6 +75,15 @@ export class SupabaseStore implements Store {
     }
   }
 
+  async replaceActions(from: string, to: string, rows: Row[]) {
+    const { error } = await this.db.from('meta_actions_daily').delete().gte('date', from).lte('date', to);
+    if (error) throw new Error(`meta_actions_daily: ${error.message}`);
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      const { error: e2 } = await this.db.from('meta_actions_daily').insert(rows.slice(i, i + CHUNK));
+      if (e2) throw new Error(`meta_actions_daily: ${e2.message}`);
+    }
+  }
+
   async replaceSignals(asOf: string, rows: Row[]) {
     const { error } = await this.db.from('signals').delete().eq('as_of', asOf);
     if (error) throw new Error(`signals: ${error.message}`);
@@ -113,6 +127,9 @@ export class MemoryStore implements Store {
       const i = t.findIndex((x) => keys.every((k) => String(x[k]) === String(r[k])));
       if (i >= 0) t[i] = { ...t[i], ...r }; else t.push({ ...r });
     }
+  }
+  async replaceActions(from: string, to: string, rows: Row[]) {
+    this.tables.meta_actions_daily = this.t('meta_actions_daily').filter((r) => r.date < from || r.date > to).concat(rows.map((r) => ({ ...r })));
   }
   async replaceSignals(asOf: string, rows: Row[]) {
     this.tables.signals = this.t('signals').filter((r) => r.as_of !== asOf).concat(rows.map((r) => ({ ...r })));
