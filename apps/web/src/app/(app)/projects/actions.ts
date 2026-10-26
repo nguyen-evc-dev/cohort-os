@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { requireAdmin } from '@/lib/supabase/server';
 import { slugify } from '@/lib/format';
+import { parseGoal } from '@cohort/core';
 
 const ID_RE = /^\d{6,25}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -24,7 +25,7 @@ export async function createProject(formData: FormData) {
   const { error } = await supabase.from('projects').insert({ name, slug, start_date: start || null, end_date: end || null });
   if (error) go('err', error.code === '23505' ? `Đã có Project với slug "${slug}".` : `Không tạo được Project (${error.message}).`);
   revalidatePath('/', 'layout');
-  go('ok', `Đã tạo Project "${name}". Tick campaign bên dưới rồi bấm Lưu.`);
+  redirect(`/projects?p=${slug}&ok=${encodeURIComponent(`Đã tạo Project "${name}". Khai báo mục tiêu và tick campaign bên dưới.`)}#goal`);
 }
 
 export async function saveCampaigns(formData: FormData) {
@@ -63,4 +64,22 @@ export async function archiveProject(formData: FormData) {
   if (error) go('err', `Không cập nhật được (${error.message}).`);
   revalidatePath('/', 'layout');
   go('ok', status === 'archived' ? 'Đã lưu trữ Project (dữ liệu giữ nguyên).' : 'Đã bật lại Project.');
+}
+
+export interface GoalState { ok: boolean; message: string }
+
+/** Lưu mục tiêu (chuỗi chuyển đổi) của Project. Server kiểm tra lại toàn bộ bằng parseGoal. */
+export async function saveGoal(_prev: GoalState, formData: FormData): Promise<GoalState> {
+  const { supabase } = await requireAdmin();
+  const projectId = str(formData.get('project_id'));
+  if (!/^[0-9a-f-]{36}$/.test(projectId)) return { ok: false, message: 'Project không hợp lệ.' };
+  let goal;
+  try { goal = parseGoal(JSON.parse(str(formData.get('goal')) || '{}')); }
+  catch (e) { return { ok: false, message: (e as Error).message }; }
+  const { error } = await supabase.from('projects').update({ goal }).eq('id', projectId);
+  if (error) {
+    return { ok: false, message: /goal/.test(error.message) ? 'DB chưa có cột goal. Chạy: npx supabase db push --linked' : `Không lưu được (${error.message}).` };
+  }
+  revalidatePath('/', 'layout');
+  return { ok: true, message: 'Đã lưu mục tiêu. Báo cáo, Creative Vault và đèn RYG đo theo bước chính từ bây giờ (đèn tính lại ở lần sync kế tiếp).' };
 }

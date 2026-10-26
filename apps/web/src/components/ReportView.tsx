@@ -1,80 +1,94 @@
 import type { ProjectReport } from '@cohort/core';
 import { DASH, fmtInt, fmtMoney, fmtPct, fmtRoas } from '@/lib/format';
-import { Chip, DailyChart, Funnel, Tile, TruthGap } from '@/components/ui';
+import { Chip, Tile, TruthGap } from '@/components/ui';
 import { ReportTable } from '@/components/ReportTable';
+import { MetricChart } from '@/components/MetricChart';
 
 type Src = 'meta' | 'crm' | 'both';
 
+/** "Check Out (điền form)" → nhãn chi phí: CPL nếu bước là lead / đăng ký, còn lại CPA. */
+export function costLabel(stepLabel: string): string {
+  return /lead|đăng ký|dang ky|form|regist|check ?out/i.test(stepLabel) ? 'CPL' : 'CPA';
+}
+
 /**
- * Thân báo cáo Project (hero → tile → Truth Gap → funnel → biểu đồ → bảng → placement).
- * Dùng chung cho trang admin và trang share (snapshot). `hideMoney`: số tiền đã bị bỏ khỏi dữ liệu, giao diện chỉ hiện tỉ lệ / số đếm.
+ * Thân báo cáo Project (đo theo mục tiêu): bước chính + chi phí → chuỗi bước → giá trị bước cuối → biểu đồ → bảng.
+ * Dùng chung cho trang admin và trang share. `hideMoney`: số tiền đã bị bỏ khỏi dữ liệu.
  */
-export function ReportView({ r, src, hideMoney = false, allowExport = true, fileName }: {
-  r: ProjectReport; src: Src; hideMoney?: boolean; allowExport?: boolean; fileName: string;
+export function ReportView({ r, src, hideMoney = false, allowExport = true, fileName, storageKey }: {
+  r: ProjectReport; src: Src; hideMoney?: boolean; allowExport?: boolean; fileName: string; storageKey: string;
 }) {
   const showCrm = r.hasCrm && src !== 'meta';
   const showMeta = src !== 'crm';
-  const crmMode = showCrm;
-
-  const hero = crmMode
-    ? { label: 'Cash ROAS (CRM)', value: fmtRoas(r.total.crm.cashRoas), cls: 'crm',
-        sub: hideMoney ? <>Số tiền đã được ẩn</> : <>Doanh thu <b className="tnum" style={{ color: 'var(--crm)' }}>{fmtMoney(r.total.crm.revenue)}</b> trên spend <b className="tnum" style={{ color: 'var(--meta)' }}>{fmtMoney(r.total.meta.spend)}</b></> }
-    : hideMoney
-      ? { label: 'Kết quả Meta', value: fmtInt(r.primary.value), cls: 'meta', sub: <>lead + purchase Meta tự báo · số tiền đã được ẩn</> }
-      : { label: 'Spend (Meta)', value: fmtMoney(r.total.meta.spend), cls: 'meta',
-          sub: <>{fmtInt(r.primary.value)} {r.primary.kind === 'meta' ? 'kết quả Meta' : 'seat'} · chi phí/kết quả <b className="tnum">{fmtMoney(r.primary.cost)}</b></> };
+  const p = r.primary;
+  const pTone = p.kind === 'crm' ? 'crm' : 'meta';
+  const others = r.steps.filter((s) => !s.isPrimary && !s.isFinal);
+  const targetHit = p.target && p.cost !== null ? p.cost <= p.target : null;
 
   return (
     <>
       <div className="hero">
         <div className="panel hero-main">
-          <div className="lbl">{hero.label}</div>
-          <div className={`hero-num ${hero.cls} ${hero.value === DASH ? 'na' : ''}`}>{hero.value}</div>
-          <div className="hero-sub">{hero.sub}</div>
+          <div className="lbl">Chuyển đổi chính · {p.label}{p.fallback ? ' (tạm dùng bước Meta, chờ CRM)' : ''}</div>
+          <div className={`hero-num ${pTone}`}>{fmtInt(p.value)}</div>
+          <div className="hero-sub" style={{ fontSize: 15 }}>
+            {costLabel(p.label)} <b className="tnum" style={{ color: `var(--${pTone})`, fontSize: 22 }}>{hideMoney ? DASH : fmtMoney(p.cost)}</b>
+            {p.target && !hideMoney && <> · target {fmtMoney(p.target)} <Chip tone={targetHit ? 'crm' : 'burn'}>{targetHit ? 'đạt' : 'vượt target'}</Chip></>}
+          </div>
         </div>
         <div className="tiles">
-          {crmMode ? (
-            <>
-              <Tile label="Spend" value={fmtMoney(r.total.meta.spend)} tone="meta" box="meta" hint="Meta" />
-              <Tile label="Revenue" value={fmtMoney(r.total.crm.revenue)} tone="crm" box="crm" hint={hideMoney ? undefined : `seat ${fmtMoney(r.total.crm.seatRevenue)} · program ${fmtMoney(r.total.crm.programRevenue)}`} />
-              <Tile label="Seat · Program" value={`${fmtInt(r.total.crm.seats)} · ${fmtInt(r.total.crm.programs)}`} tone="crm" box="crm" hint={`${fmtInt(r.total.crm.leads)} lead (CRM)`} />
-              <Tile label="CPA thực (seat)" value={fmtMoney(r.total.crm.cpaSeat)} tone="crm" box="crm" hint={r.total.meta.cpaMeta !== null ? `Meta báo ${fmtMoney(r.total.meta.cpaMeta)}` : undefined} />
-            </>
-          ) : (
-            <>
-              <Tile label="Lead (Meta)" value={fmtInt(r.total.meta.leads)} tone="meta" box="meta" hint={`CPL ${fmtMoney(r.total.meta.cpl)}`} />
-              <Tile label="Purchase (Meta)" value={fmtInt(r.total.meta.purchases)} tone="meta" box="meta" hint={`CPA ${fmtMoney(r.total.meta.cpaMeta)}`} />
-              <Tile label="CPM" value={fmtMoney(r.total.meta.cpm)} tone="meta" box="meta" hint={`${fmtInt(r.total.meta.impressions)} impressions`} />
-              <Tile label="CTR link" value={r.total.meta.ctr === null ? DASH : fmtPct(r.total.meta.ctr * 100)} tone="meta" box="meta" hint={`${fmtInt(r.total.meta.clicks)} clicks`} />
-            </>
+          <Tile label="Spend" value={hideMoney ? DASH : fmtMoney(r.total.meta.spend)} tone="meta" box="meta"
+            hint={`${fmtInt(r.total.meta.impressions)} impr · CTR ${r.total.meta.ctr === null ? DASH : fmtPct(r.total.meta.ctr * 100)}`} />
+          <Tile label={`Bước cuối · ${r.final.label}`} value={r.final.available ? fmtInt(r.final.count) : 'Chờ CRM'} tone={r.final.available ? 'crm' : ''} box="crm"
+            hint={r.final.available ? <>{costLabel(r.final.label)} {fmtMoney(r.final.cost)} · giá trị {fmtMoney(r.final.value)}{r.final.roas !== null && <> · ROAS {fmtRoas(r.final.roas)}</>}</> : 'Import HubSpot để có số bước cuối'} />
+          {others.slice(0, 2).map((s) => (
+            <Tile key={s.key} label={s.label} value={s.available ? fmtInt(s.count) : 'Chờ CRM'} tone={s.available ? (s.source === 'crm' ? 'crm' : 'meta') : ''} box={s.source === 'crm' ? 'crm' : 'meta'}
+              hint={s.available ? `${costLabel(s.label)} ${fmtMoney(s.cost)}${s.rateFromPrev !== null ? ` · ${fmtPct(s.rateFromPrev)} từ bước trước` : ''}` : undefined} />
+          ))}
+          {others.length < 2 && (
+            <Tile label="CPM · CPC" value={hideMoney ? DASH : `${fmtMoney(r.total.meta.cpm)} · ${fmtMoney(r.total.meta.cpc)}`} tone="meta" box="meta"
+              hint={r.total.meta.hookRate !== null ? `Hook rate ${fmtPct(r.total.meta.hookRate * 100)} · Hold ${r.total.meta.holdRate === null ? DASH : fmtPct(r.total.meta.holdRate * 100)}` : `LPV/click ${r.total.meta.lpvRate === null ? DASH : fmtPct(r.total.meta.lpvRate * 100)}`} />
           )}
         </div>
+      </div>
+
+      <h2 className="section-title">Chuỗi chuyển đổi <small>{r.goal.focus || (r.goalConfigured ? '' : 'mặc định: Lead / Purchase Meta → CRM')}</small></h2>
+      <div className="panel tight chain" role="list">
+        {r.steps.map((s) => (
+          <div key={s.key} role="listitem" className={s.isPrimary ? 'main' : ''}>
+            {s.rateFromPrev !== null && <span className="rate">{fmtPct(s.rateFromPrev)}</span>}
+            <div className="lbl" style={{ marginBottom: 2 }}>{s.label}{s.isPrimary ? ' · chính' : s.isFinal ? ' · cuối' : ''}</div>
+            <div className={`v ${s.available ? s.source : 'na'}`}>{s.available ? fmtInt(s.count) : DASH}</div>
+            <div className="c">{s.available ? <>{costLabel(s.label)} {fmtMoney(s.cost)}{s.value ? <> · {fmtMoney(s.value)}</> : null}</> : 'Chờ CRM'}</div>
+            <div className="c" style={{ color: 'var(--faint)' }}>{s.source === 'meta' ? 'Meta' : 'CRM'}</div>
+          </div>
+        ))}
       </div>
 
       {r.hasCrm && showCrm && showMeta && r.truthGap && (
         <div className="grid g2" style={{ marginTop: 16 }}>
           <TruthGap gap={r.truthGap} />
-          <div className="grid" style={{ gridTemplateRows: 'auto auto' }}>
-            <Funnel f={r.funnel} />
-            <div className="panel" style={{ fontSize: 13 }}>
-              <span className="lbl">Độ phủ tracking</span>
-              <b className="tnum" style={{ fontSize: 22 }}>{fmtPct(r.trackedPct)}</b>
-              <span style={{ color: 'var(--muted)' }}> lượt đăng ký gắn được ad (h_ad_id)</span>
-              {r.unattributed.leadIds > 0 && <> · <Chip tone="warn">{r.unattributed.leadIds} lead unattributed</Chip></>}
-            </div>
+          <div className="panel" style={{ fontSize: 13 }}>
+            <span className="lbl">Độ phủ tracking</span>
+            <b className="tnum" style={{ fontSize: 22 }}>{fmtPct(r.trackedPct)}</b>
+            <span style={{ color: 'var(--muted)' }}> lượt đăng ký gắn được ad (h_ad_id)</span>
+            {r.unattributed.leadIds > 0 && <> · <Chip tone="warn">{r.unattributed.leadIds} lead unattributed</Chip></>}
           </div>
         </div>
       )}
-      {r.hasCrm && showCrm && !showMeta && <div style={{ marginTop: 16 }}><Funnel f={r.funnel} /></div>}
 
-      <h2 className="section-title">{hideMoney ? 'Xu hướng spend theo ngày' : 'Spend & chi phí theo ngày'} <small>{hideMoney ? 'chỉ số tương đối, ngày cao nhất = 100' : 'giờ PT'}</small></h2>
-      <div className="panel"><DailyChart daily={r.daily} mode={crmMode ? 'crm' : 'meta'} relative={hideMoney} /></div>
+      <h2 className="section-title">Theo ngày <small>{hideMoney ? 'spend là chỉ số tương đối (cao nhất = 100)' : 'giờ PT · chọn tối đa 6 chỉ số'}</small></h2>
+      <div className="panel">
+        <MetricChart daily={r.daily} steps={r.steps.map((s) => ({ key: s.key, label: s.label, source: s.source, available: s.available }))}
+          primaryKey={p.key} storageKey={storageKey} relative={hideMoney} />
+      </div>
 
       <h2 className="section-title">Campaign → Adset → Ad <small>Meta tự báo (slate) · CRM sự thật (lime) · Δ lệch (amber)</small></h2>
       {r.tree.length === 0
         ? <div className="panel empty"><h3>Không có chi tiêu trong khoảng này</h3><p>Thử chọn “30 ngày” hoặc “Tất cả”.</p></div>
         : <ReportTable tree={r.tree} total={r.total} unattributed={r.unattributed} hasCrm={r.hasCrm} src={src}
-            baselineCost={hideMoney ? null : r.primary.cost} fileName={fileName} allowExport={allowExport && !hideMoney} />}
+            steps={r.steps.map((s) => ({ key: s.key, label: s.label, source: s.source }))} primaryKey={p.key} finalKey={r.final.key}
+            hasCompare={!!r.goal.compare} baselineCost={hideMoney ? null : (r.goal.target_cost ?? p.cost)} fileName={fileName} allowExport={allowExport && !hideMoney} />}
 
       {r.hasCrm && showCrm && r.placements.length > 0 && (
         <>
@@ -83,8 +97,8 @@ export function ReportView({ r, src, hideMoney = false, allowExport = true, file
             <table className="data">
               <thead><tr><th className="l" style={{ cursor: 'default' }}>Placement</th><th style={{ cursor: 'default' }}>Lượt đăng ký</th><th style={{ cursor: 'default' }}>% lead</th><th style={{ cursor: 'default' }}>Seat</th><th style={{ cursor: 'default' }}>Program</th></tr></thead>
               <tbody>
-                {r.placements.map((p) => (
-                  <tr key={p.placement}><td className="l mono">{p.placement}</td><td className="n crm">{fmtInt(p.leads)}</td><td className="n">{fmtPct(p.sharePct)}</td><td className="n crm">{fmtInt(p.seats)}</td><td className="n crm">{fmtInt(p.programs)}</td></tr>
+                {r.placements.map((pl) => (
+                  <tr key={pl.placement}><td className="l mono">{pl.placement}</td><td className="n crm">{fmtInt(pl.leads)}</td><td className="n">{fmtPct(pl.sharePct)}</td><td className="n crm">{fmtInt(pl.seats)}</td><td className="n crm">{fmtInt(pl.programs)}</td></tr>
                 ))}
               </tbody>
             </table>

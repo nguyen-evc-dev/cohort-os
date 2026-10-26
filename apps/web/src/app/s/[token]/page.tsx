@@ -18,6 +18,9 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
   if (error || !data) notFound();
   const snap = data.snapshot as ShareSnapshot;
   if (!snap || snap.v !== 1 || !snap.report) notFound();
+  if (!Array.isArray(snap.report.steps)) {
+    return <main className="share-wrap"><Banner tone="warn">Link này được tạo bằng phiên bản cũ của Cohort OS. Nhờ người gửi tạo link mới.</Banner></main>;
+  }
 
   const r = snap.report;
   const when = new Date(snap.generatedAt);
@@ -35,11 +38,11 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
       <Banner tone="meta">📸 <b>Snapshot</b> chụp lúc {stamp} (giờ VN). Số liệu đã đóng băng, không cập nhật theo thời gian thực.{snap.hideMoney && <> Số tiền đã được ẩn.</>}</Banner>
       <div id="share-capture">
         <div className="only-capture"><h1 style={{ fontSize: 28 }}>{snap.projectName}</h1><p className="note" style={{ margin: '4px 0 16px' }}>{fmtRange(r.range.from, r.range.to)} · giờ PT</p></div>
-        <ReportView r={r} src={snap.src} hideMoney={snap.hideMoney} allowExport={false} fileName="share" />
+        <ReportView r={r} src={snap.src} hideMoney={snap.hideMoney} allowExport={false} fileName="share" storageKey={`share-${token.slice(0, 8)}`} />
         {r.concepts.length > 0 && (
           <>
             <h2 className="section-title">Creative <small>{r.concepts.length} concept</small></h2>
-            <CreativeGrid concepts={r.concepts} thumbs={snap.thumbs} crmMode={crmMode} />
+            <CreativeGrid concepts={r.concepts} thumbs={snap.thumbs} crmMode={crmMode} primaryLabel={r.primary.label} steps={r.steps} />
           </>
         )}
       </div>

@@ -53,7 +53,7 @@ export function TruthGap({ gap }: { gap: NonNullable<ProjectReport['truthGap']> 
           <div className="bar"><i className="crm" style={{ width: `${(gap.crmSeats / max) * 100}%` }} /></div><b className="tnum">{fmtInt(gap.crmSeats)}</b></div>
       </div>
       <p className="gap-note" style={{ margin: '12px 0 0' }}>
-        Meta báo <b style={{ color: 'var(--meta)' }}>{gap.metaPurchases}</b> purchase · CRM ghi nhận <b style={{ color: 'var(--crm)' }}>{gap.crmSeats}</b> seat
+        Meta báo <b style={{ color: 'var(--meta)' }}>{gap.metaPurchases}</b> {gap.metaLabel} · CRM ghi nhận <b style={{ color: 'var(--crm)' }}>{gap.crmSeats}</b> {gap.crmLabel}
         {over !== null && <> · {over > 0 ? 'Over-report ' : 'Under-report '}<Chip tone={Math.abs(over) > 30 ? 'warn' : ''}>{over > 0 ? '▲' : '▼'} {fmtPct(Math.abs(over))}</Chip></>}
       </p>
     </div>

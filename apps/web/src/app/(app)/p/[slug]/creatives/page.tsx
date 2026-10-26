@@ -70,7 +70,7 @@ export default async function CreativeVault({ params, searchParams }: { params: 
       {list.length === 0 ? (
         <div className="panel empty"><h3>Không có creative nào</h3><p>Bỏ bớt bộ lọc hoặc chọn khoảng ngày dài hơn.</p></div>
       ) : (
-        <CreativeGrid concepts={list} crmMode={crmMode}
+        <CreativeGrid concepts={list} crmMode={crmMode} primaryLabel={r.primary.label} steps={r.steps}
           thumbs={Object.fromEntries(list.flatMap((c) => { const a = assetOf(c); return a?.drive_file_id ? [[c.conceptKey, a.drive_file_id as string]] : []; }))}
           extra={(c) => {
             const asset = assetOf(c);

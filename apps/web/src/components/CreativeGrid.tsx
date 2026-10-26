@@ -1,15 +1,18 @@
 import type { ReactNode } from 'react';
-import type { ConceptRow } from '@cohort/core';
+import type { ConceptRow, StepSummary } from '@cohort/core';
 import { fmtInt, fmtMoney, fmtRate } from '@/lib/format';
 
 const STATUS = { green: 'Winner', red: 'Burner', yellow: 'Theo dõi', grey: 'Chưa đủ data' } as const;
 
 /** Lưới thẻ creative theo concept (Design Proposal 4.2). Dùng chung cho Creative Vault và trang share. */
-export function CreativeGrid({ concepts, thumbs, crmMode, extra }: {
+export function CreativeGrid({ concepts, thumbs, crmMode, extra, primaryLabel, steps }: {
   concepts: ConceptRow[];
   /** conceptKey → fileId Drive (ảnh phục vụ qua /api/thumb) */
   thumbs: Record<string, string>;
   crmMode: boolean;
+  /** Tên bước chính của mục tiêu (vd "Purchased (mua vé)") */
+  primaryLabel: string;
+  steps: StepSummary[];
   /** Phần thêm dưới mỗi thẻ (nút gắn ảnh — chỉ admin) */
   extra?: (c: ConceptRow) => ReactNode;
 }) {
@@ -17,7 +20,7 @@ export function CreativeGrid({ concepts, thumbs, crmMode, extra }: {
     <div className="vault">
       {concepts.map((c) => {
         const fileId = thumbs[c.conceptKey];
-        const cpa = crmMode ? c.crm.cpaSeat : c.cpaReal;
+        const cpa = c.cpaReal;
         return (
           <article key={c.conceptKey} className={`cv ${c.light}`}>
             <div className="thumb">
@@ -32,14 +35,15 @@ export function CreativeGrid({ concepts, thumbs, crmMode, extra }: {
               <div className="nm" title={c.concept}>{c.concept}</div>
               <div className={`cap ${crmMode ? '' : 'metaonly'}`}>
                 Đã tiêu: <b style={{ color: 'var(--meta)' }}>{fmtMoney(c.meta.spend)}</b>{' | '}
-                {crmMode ? 'Mang về' : 'Kết quả'}: <b>{fmtInt(c.conversions)}{crmMode ? ' Seat' : ''}</b>{' | '}
-                {crmMode ? 'CPA thực' : 'CPA'}: <b>{fmtMoney(cpa)}</b>
+                {primaryLabel}: <b>{fmtInt(c.conversions)}</b>{' | '}
+                CPA: <b>{fmtMoney(cpa)}</b>
               </div>
               <div className="cap">{c.ads.length} ad · CTR {fmtRate(c.meta.ctr)} · CPM {fmtMoney(c.meta.cpm)}</div>
               {extra?.(c)}
               <div className="flip">
-                <div style={{ color: 'var(--meta)' }}>Meta: {fmtInt(c.meta.leads)} lead · {fmtInt(c.meta.purchases)} purchase · CPA {fmtMoney(c.meta.cpaMeta)}</div>
-                {crmMode && <div style={{ color: 'var(--crm)' }}>CRM: {fmtInt(c.crm.leads)} lead · {fmtInt(c.crm.seats)} seat · {fmtMoney(c.crm.revenue)}</div>}
+                {steps.filter((s) => s.available && (crmMode || s.source === 'meta')).map((s) => (
+                  <div key={s.key} style={{ color: s.source === 'crm' ? 'var(--crm)' : 'var(--meta)' }}>{s.label}: {fmtInt(c.steps[s.key]?.count ?? 0)} · {fmtMoney(c.steps[s.key]?.cost ?? null)}</div>
+                ))}
               </div>
             </div>
           </article>

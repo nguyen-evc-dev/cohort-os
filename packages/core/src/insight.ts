@@ -18,6 +18,10 @@ export interface InsightPayload {
   range: { from: string | null; to: string | null };
   mode: 'meta' | 'crm';
   signals_as_of: string | null;
+  goal: Record<string, unknown>;
+  steps: Record<string, unknown>[];
+  primary: Record<string, unknown>;
+  final: Record<string, unknown>;
   total: Record<string, unknown>;
   truth_gap: Record<string, unknown> | null;
   funnel: Record<string, unknown> | null;
@@ -37,8 +41,10 @@ export function buildInsightPayload(input: {
   const r = input.report;
   const crm = r.hasCrm;
   const g = defaultConfig().global;
+  const stepsOf = (m: { steps: ProjectReport['total']['steps'] }) => Object.fromEntries(r.steps.filter((s) => s.available).map((s) => [s.key, { count: m.steps[s.key]?.count ?? 0, cost: m.steps[s.key]?.cost ?? null }]));
   const metaOf = (m: { meta: ProjectReport['total']['meta'] }) => ({
-    spend: m.meta.spend, impressions: m.meta.impressions, clicks: m.meta.clicks, ctr: m.meta.ctr, cpm: m.meta.cpm,
+    spend: m.meta.spend, impressions: m.meta.impressions, clicks: m.meta.clicks, ctr: m.meta.ctr, cpm: m.meta.cpm, cpc: m.meta.cpc,
+    hook_rate: m.meta.hookRate, hold_rate: m.meta.holdRate, lpv_rate: m.meta.lpvRate,
     leads_meta: m.meta.leads, purchases_meta: m.meta.purchases, cpl_meta: nn(m.meta.cpl), cpa_meta: nn(m.meta.cpaMeta), landing_page_views: m.meta.lpv,
   });
   const crmOf = (m: ProjectReport['total']) => (crm ? {
@@ -49,16 +55,20 @@ export function buildInsightPayload(input: {
     range: r.range,
     mode: crm ? 'crm' : 'meta',
     signals_as_of: input.signalsAsOf ?? null,
+    goal: { focus: r.goal.focus || null, configured: r.goalConfigured, primary: r.goal.primary, final: r.goal.final, compare: r.goal.compare, target_cost: r.goal.target_cost },
+    steps: r.steps.map((s) => ({ key: s.key, label: s.label, source: s.source, available: s.available, count: s.count, cost: s.cost, value: s.value, rate_from_prev: s.rateFromPrev })),
+    primary: { label: r.primary.label, count: r.primary.value, cost: r.primary.cost, target: r.primary.target, fallback_meta: r.primary.fallback },
+    final: { label: r.final.label, available: r.final.available, count: r.final.count, cost: r.final.cost, value: r.final.value, roas: r.final.roas },
     total: { ...metaOf(r.total), ...crmOf(r.total), results_for_cost: r.primary.value, cost_per_result: nn(r.primary.cost) },
     truth_gap: r.truthGap ? { meta_purchases: r.truthGap.metaPurchases, crm_seats: r.truthGap.crmSeats, overreport_pct: nn(r.truthGap.overreportPct) } : null,
     funnel: crm ? { leads: r.funnel.leads, seats: r.funnel.seats, programs: r.funnel.programs, lead_to_seat_pct: nn(r.funnel.leadToSeatPct), seat_to_program_pct: nn(r.funnel.seatToProgramPct) } : null,
     tracked_pct: nn(r.trackedPct),
     concepts: r.concepts.slice(0, 10).map((c) => ({
-      concept: c.concept, format: c.format, stages: c.stages, light: c.light, ads: c.ads.length, ...metaOf(c),
+      concept: c.concept, format: c.format, stages: c.stages, light: c.light, ads: c.ads.length, ...metaOf(c), steps: stepsOf(c), primary_count: c.conversions, primary_cost: nn(c.cpaReal),
       ...(crm ? { crm_leads: c.crm.leads, seats: c.crm.seats, cpa_seat: nn(c.crm.cpaSeat) } : { cost_per_result: nn(c.cpaReal), results: c.conversions }),
     })),
     campaigns: r.tree.slice(0, 8).map((c) => ({
-      campaign: c.name, sac: !!c.isSac, ...metaOf(c), ...(crm ? { crm_leads: c.crm.leads, seats: c.crm.seats, cpa_seat: nn(c.crm.cpaSeat), cash_roas: nn(c.crm.cashRoas) } : {}),
+      campaign: c.name, sac: !!c.isSac, ...metaOf(c), steps: stepsOf(c), ...(crm ? { crm_leads: c.crm.leads, seats: c.crm.seats, cpa_seat: nn(c.crm.cpaSeat), cash_roas: nn(c.crm.cashRoas) } : {}),
     })),
     signals: (input.signals ?? []).slice(0, 12).map((s) => {
       const n = s.numbers || {};
@@ -115,7 +125,7 @@ export function findUngroundedNumbers(text: string, payload: unknown): string[] 
 }
 
 export function insightSystemPrompt(): string {
-  return `${SKILLS['ads-deep-analysis'] ?? ''}\n\n## Dữ liệu\nTin nhắn người dùng là một khối JSON tổng hợp. Chỉ phân tích dữ liệu trong khối đó.`;
+  return `${SKILLS['ads-deep-analysis'] ?? ''}\n\n${SKILLS['meta-ads-playbook'] ?? ''}\n\n## Dữ liệu\nTin nhắn người dùng là một khối JSON tổng hợp. Chỉ phân tích dữ liệu trong khối đó.`;
 }
 
 export function insightUserMessage(payload: InsightPayload, question?: string): string {

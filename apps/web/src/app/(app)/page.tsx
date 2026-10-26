@@ -1,8 +1,9 @@
 import Link from 'next/link';
-import { buildProjectReport, type Row } from '@cohort/core';
+import { buildProjectReport, readGoal, type Row } from '@cohort/core';
 import { createClient } from '@/lib/supabase/server';
 import { getWorkspace } from '@/lib/server-data';
-import { loadCrm, loadMeta, loadSignals } from '@/lib/data';
+import { loadActions, loadCrm, loadMeta, loadSignals } from '@/lib/data';
+import { costLabel } from '@/components/ReportView';
 import { filterQuery, parseFilters, showCrm, showMeta } from '@/lib/filters';
 import { DASH, fmtInt, fmtMoney, fmtRange, fmtRoas } from '@/lib/format';
 import { Banner, Chip, Light, PageHead, Tile } from '@/components/ui';
@@ -16,16 +17,18 @@ export default async function Overview({ searchParams }: { searchParams: Promise
   const ws = await getWorkspace();
   const f = parseFilters(await searchParams, ws.latestDate);
   const db = await createClient();
-  const [metaRows, crm, sig] = await Promise.all([loadMeta(db, f), loadCrm(db), loadSignals(db)]);
+  const projects = ws.projects.filter((p) => p.status === 'active');
+  const goals = new Map(projects.map((p) => [p.id as string, readGoal(p.goal)]));
+  const actionTypes = [...new Set([...goals.values()].flatMap((g) => (g?.steps ?? []).filter((x) => x.source === 'meta' && x.action_type).map((x) => x.action_type!)))];
+  const [metaRows, crm, sig, actions] = await Promise.all([loadMeta(db, f), loadCrm(db), loadSignals(db), loadActions(db, f, actionTypes)]);
   const q = filterQuery(f);
 
-  const projects = ws.projects.filter((p) => p.status === 'active');
   const mapped = new Set(ws.projectCampaigns.map((c) => String(c.campaign_id)));
   const cards = projects.map((p) => {
     const ids = ws.projectCampaigns.filter((c) => c.project_id === p.id).map((c) => String(c.campaign_id));
     const report = buildProjectReport({
       metaRows, campaignIds: ids, range: { from: f.from, to: f.to },
-      submissions: crm.submissions.filter((s) => s.project_id === p.id), deals: crm.deals,
+      submissions: crm.submissions.filter((s) => s.project_id === p.id), deals: crm.deals, actions, goal: goals.get(p.id) ?? null,
     });
     return { p, ids, report };
   });
@@ -67,8 +70,8 @@ export default async function Overview({ searchParams }: { searchParams: Promise
       <div className="grid g4">
         <Tile label="Spend toàn tài khoản (Meta)" value={fmtMoney(account.total.meta.spend)} tone="meta" box="meta"
           hint={`${account.tree.length} campaign có chi tiêu`} />
-        <Tile label="Kết quả Meta" value={fmtInt(results)} tone="meta" box="meta" hint="lead + purchase Meta tự báo" />
-        <Tile label="Chi phí / kết quả" value={fmtMoney(account.primary.cost)} tone="meta" box="meta" hint="spend ÷ kết quả Meta" />
+        <Tile label={account.primary.label} value={fmtInt(results)} tone="meta" box="meta" hint="toàn tài khoản, Meta tự báo" />
+        <Tile label={`${costLabel(account.primary.label)} toàn tài khoản`} value={fmtMoney(account.primary.cost)} tone="meta" box="meta" hint="mỗi Project đo theo mục tiêu riêng ↓" />
         <Link href="/p/all/ryg" style={{ textDecoration: 'none' }}>
           <Tile label={`Đèn RYG · ${sig.asOf ?? DASH}`} value={<span style={{ display: 'inline-flex', gap: 14, alignItems: 'center' }}>
             <span><Light c="red" /> {counts.red}</span><span><Light c="yellow" /> {counts.yellow}</span><span><Light c="green" /> {counts.green}</span>
@@ -80,24 +83,22 @@ export default async function Overview({ searchParams }: { searchParams: Promise
       <div className="episodes">
         {cards.map(({ p, ids, report }) => {
           const hasCrm = report.hasCrm;
-          const roas = report.total.crm.cashRoas;
+          const pr = report.primary;
+          const fin = report.final;
+          // Glow khi đạt target chi phí của bước chính (hoặc giá trị bước cuối ≥ spend nếu chưa đặt target)
+          const glow = pr.target ? pr.cost !== null && pr.cost <= pr.target : fin.available && fin.value >= report.total.meta.spend * GLOW_ROAS && fin.value > 0;
           return (
-            <Link key={p.id} href={`/p/${p.slug}${q}`} className={`episode ${hasCrm && roas !== null && roas >= GLOW_ROAS ? 'glow' : ''}`}>
+            <Link key={p.id} href={`/p/${p.slug}${q}`} className={`episode ${glow ? 'glow' : ''}`}>
               <h3>{p.name}</h3>
               <div className="date">{p.start_date ? `${p.start_date} → ${p.end_date ?? 'đang chạy'}` : `${ids.length} campaign`}</div>
               <div className="row"><span>Spend</span><b className="meta">{fmtMoney(report.total.meta.spend)}</b></div>
-              {showCrm(f) && hasCrm
-                ? <>
-                    <div className="row"><span>Seat</span><b className="crm">{fmtInt(report.total.crm.seats)}</b></div>
-                    <div className="row"><span>Cash ROAS</span><b className="crm">{fmtRoas(roas)}</b></div>
-                  </>
-                : <>
-                    <div className="row"><span>{showMeta(f) ? 'Purchase (Meta)' : 'Seat'}</span><b className="meta">{showMeta(f) ? fmtInt(report.total.meta.purchases) : DASH}</b></div>
-                    <div className="row"><span>CPA Meta</span><b className="meta">{fmtMoney(report.total.meta.cpaMeta)}</b></div>
-                  </>}
+              <div className="row"><span>{pr.label}</span><b className={pr.kind}>{fmtInt(pr.value)}</b></div>
+              <div className="row"><span>{costLabel(pr.label)}</span><b className={pr.kind}>{fmtMoney(pr.cost)}</b></div>
+              {showCrm(f) && <div className="row"><span>{fin.label}</span><b className="crm">{fin.available ? <>{fmtInt(fin.count)}{fin.value > 0 && <span style={{ fontWeight: 400, fontSize: 13 }}> · {fmtMoney(fin.value)}</span>}</> : DASH}</b></div>}
               <div className="steps">
                 <Chip tone="meta">① Meta ✓</Chip>
                 {hasCrm ? <Chip tone="crm">② CRM ✓ · {report.total.crm.leads} lead</Chip> : <Chip tone="warn">② Chờ CRM</Chip>}
+                {!report.goalConfigured && <Chip tone="warn">🎯 chưa khai báo mục tiêu</Chip>}
               </div>
             </Link>
           );

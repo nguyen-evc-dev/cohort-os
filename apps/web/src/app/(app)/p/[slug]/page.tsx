@@ -46,6 +46,9 @@ export default async function ProjectReportPage({ params, searchParams }: { para
         </span>}
       />
 
+      {project.id && !r.goalConfigured && (
+        <Banner tone="warn"><span>🎯 Project chưa khai báo <b>mục tiêu</b>, nên đang đo tạm bằng Lead / Purchase mặc định của Meta. <Link href={`/projects?p=${project.slug}#goal`}>Khai báo chuyển đổi chính (custom conversion) →</Link></span></Banner>
+      )}
       {noCampaigns && <Banner tone="meta">Project này chưa có campaign nào. <Link href="/projects">Gán campaign →</Link></Banner>}
       {!r.hasCrm && !noCampaigns && project.id && (
         <Banner tone="meta"><span>② <b>Chờ CRM</b>: chưa import HubSpot cho Project này, nên chỉ có số Meta (tự báo). <Link href="/import">Import HubSpot →</Link></span></Banner>
@@ -63,7 +66,7 @@ export default async function ProjectReportPage({ params, searchParams }: { para
 
       <div id="report-capture">
         <div className="only-capture"><h1 style={{ fontSize: 28 }}>{project.name}</h1><p className="note" style={{ margin: '4px 0 16px' }}>{range} · giờ PT</p></div>
-        <ReportView r={r} src={f.src} fileName={`cohort-os-${project.slug}-${f.from ?? 'all'}`} />
+        <ReportView r={r} src={f.src} fileName={`cohort-os-${project.slug}-${f.from ?? 'all'}`} storageKey={project.slug} />
       </div>
     </>
   );

@@ -1,7 +1,8 @@
-import { isSacCampaign } from '@cohort/core';
+import { isSacCampaign, readGoal } from '@cohort/core';
 import { createClient } from '@/lib/supabase/server';
 import { getWorkspace } from '@/lib/server-data';
-import { fetchAll } from '@/lib/data';
+import { fetchAll, loadCustomConversions } from '@/lib/data';
+import { GoalEditor, type CustomConversion } from './GoalEditor';
 import { fmtDay, fmtMoney } from '@/lib/format';
 import { Banner, Chip, PageHead } from '@/components/ui';
 import { archiveProject, createProject, saveCampaigns } from './actions';
@@ -14,7 +15,11 @@ export default async function ProjectsPage({ searchParams }: { searchParams: SP 
   const sp = await searchParams;
   const ws = await getWorkspace();
   const db = await createClient();
-  const rows = await fetchAll((a, b) => db.from('meta_ads_daily').select('campaign_id,campaign_name,spend,date').order('date').order('ad_id').range(a, b));
+  const [rows, customRows] = await Promise.all([
+    fetchAll((a, b) => db.from('meta_ads_daily').select('campaign_id,campaign_name,spend,date').order('date').order('ad_id').range(a, b)),
+    loadCustomConversions(db),
+  ]);
+  const customs: CustomConversion[] = customRows.map((c) => ({ id: String(c.id), name: String(c.name), event_type: c.event_type ?? null, is_archived: !!c.is_archived, last_fired_at: c.last_fired_at ?? null }));
 
   const byCamp = new Map<string, { id: string; name: string; spend: number; last: string; first: string }>();
   for (const r of rows) {
@@ -61,9 +66,13 @@ export default async function ProjectsPage({ searchParams }: { searchParams: SP 
                 <b style={{ fontSize: 16 }}>{p.name}</b><span className="mono" style={{ color: 'var(--muted)' }}>{p.slug}</span>
                 <Chip tone={mine ? 'meta' : 'warn'}>{mine} campaign</Chip>
                 {p.status === 'archived' && <Chip>lưu trữ</Chip>}
+                {readGoal(p.goal) ? <Chip tone="crm">🎯 {readGoal(p.goal)!.steps.find((x) => x.key === readGoal(p.goal)!.primary)?.label}</Chip> : <Chip tone="warn">🎯 chưa khai báo mục tiêu</Chip>}
               </summary>
 
-              <form method="get" style={{ display: 'flex', gap: 8, margin: '14px 0 4px', alignItems: 'end' }}>
+              <GoalEditor projectId={p.id} initial={readGoal(p.goal)} customs={customs} />
+
+              <h4 style={{ margin: '18px 0 0', fontSize: 14 }}>Campaign của Project</h4>
+              <form method="get" style={{ display: 'flex', gap: 8, margin: '8px 0 4px', alignItems: 'end' }}>
                 <input type="hidden" name="p" value={p.slug} />
                 <div style={{ flex: 1 }}><label htmlFor={`kw-${p.id}`}>Gợi ý theo từ khóa trong tên campaign</label>
                   <input id={`kw-${p.id}`} name="kw" defaultValue={kwProject === p.slug ? kw : ''} placeholder="vd: WBN-RE hoặc SELLER" /></div>

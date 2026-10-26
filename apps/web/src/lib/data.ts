@@ -1,6 +1,6 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { buildProjectReport, type ProjectReport, type Row } from '@cohort/core';
+import { buildProjectReport, readGoal, type ProjectGoal, type ProjectReport, type Row } from '@cohort/core';
 import type { Filters } from './filters';
 
 const PAGE = 1000;
@@ -16,7 +16,9 @@ export async function fetchAll(build: (from: number, to: number) => PromiseLike<
   }
 }
 
-const META_COLS = 'date,ad_id,campaign_id,campaign_name,adset_id,adset_name,ad_name,creative_concept,concept_key,creative_format,funnel_stage,spend,impressions,link_clicks,leads_meta,purchases_meta,landing_page_views,provisional';
+const META_COLS = 'date,ad_id,campaign_id,campaign_name,adset_id,adset_name,ad_name,creative_concept,concept_key,creative_format,funnel_stage,spend,impressions,link_clicks,leads_meta,purchases_meta,landing_page_views,thruplay,provisional';
+/** Cột thêm ở migration conversion_goals (chưa đẩy migration thì đọc không có). */
+const META_COLS_NEW = `${META_COLS},video_3s,outbound_clicks`;
 
 export interface Workspace {
   projects: Row[];
@@ -44,12 +46,33 @@ export async function loadWorkspace(db: SupabaseClient): Promise<Workspace> {
 }
 
 export async function loadMeta(db: SupabaseClient, f: Pick<Filters, 'from' | 'to'>): Promise<Row[]> {
-  return fetchAll((a, b) => {
-    let q = db.from('meta_ads_daily').select(META_COLS);
+  const run = (cols: string) => fetchAll((a, b) => {
+    let q = db.from('meta_ads_daily').select(cols);
     if (f.from) q = q.gte('date', f.from);
     if (f.to) q = q.lte('date', f.to);
     return q.order('date').order('ad_id').range(a, b);
   });
+  try { return await run(META_COLS_NEW); } catch { return run(META_COLS); }
+}
+
+/** Chuyển đổi theo ad × ngày × loại (custom conversion…). Chưa có bảng (chưa đẩy migration) → rỗng. */
+export async function loadActions(db: SupabaseClient, f: Pick<Filters, 'from' | 'to'>, actionTypes: string[]): Promise<Row[]> {
+  const types = actionTypes.filter((t) => !t.startsWith('col.'));
+  if (!types.length) return [];
+  try {
+    return await fetchAll((a, b) => {
+      let q = db.from('meta_actions_daily').select('date,ad_id,campaign_id,action_type,count').in('action_type', types);
+      if (f.from) q = q.gte('date', f.from);
+      if (f.to) q = q.lte('date', f.to);
+      return q.order('date').order('ad_id').order('action_type').range(a, b);
+    });
+  } catch { return []; }
+}
+
+/** Danh mục custom conversion (để chọn khi khai báo mục tiêu). Chưa có bảng → rỗng. */
+export async function loadCustomConversions(db: SupabaseClient): Promise<Row[]> {
+  try { return await fetchAll((a, b) => db.from('meta_custom_conversions').select('*').order('is_archived').order('last_fired_at', { ascending: false, nullsFirst: false }).range(a, b)); }
+  catch { return []; }
 }
 
 export async function loadEntities(db: SupabaseClient): Promise<Row[]> {
@@ -104,15 +127,18 @@ export const ALL_SLUG = 'all';
 export interface ProjectView {
   slug: string; name: string; id: string | null; startDate: string | null; endDate: string | null;
   campaignIds: string[] | null;
+  /** Mục tiêu đã khai báo (null = chưa khai báo, dùng mặc định) */
+  goal: ProjectGoal | null;
 }
 
 export function resolveProject(ws: Workspace, slug: string): ProjectView | null {
-  if (slug === ALL_SLUG) return { slug, name: 'Toàn tài khoản', id: null, startDate: null, endDate: null, campaignIds: null };
+  if (slug === ALL_SLUG) return { slug, name: 'Toàn tài khoản', id: null, startDate: null, endDate: null, campaignIds: null, goal: null };
   const p = ws.projects.find((x) => x.slug === slug);
   if (!p) return null;
   return {
     slug: p.slug, name: p.name, id: p.id, startDate: p.start_date, endDate: p.end_date,
     campaignIds: ws.projectCampaigns.filter((c) => c.project_id === p.id).map((c) => String(c.campaign_id)),
+    goal: readGoal(p.goal),
   };
 }
 
@@ -121,13 +147,14 @@ export interface LoadedReport { project: ProjectView; report: ProjectReport; ent
 export async function loadReport(db: SupabaseClient, ws: Workspace, slug: string, f: Filters): Promise<LoadedReport | null> {
   const project = resolveProject(ws, slug);
   if (!project) return null;
-  const [metaRows, entities, crm, sig, assets] = await Promise.all([
+  const actionTypes = (project.goal?.steps ?? []).filter((s) => s.source === 'meta' && s.action_type).map((s) => s.action_type!);
+  const [metaRows, entities, crm, sig, assets, actions] = await Promise.all([
     loadMeta(db, f), loadEntities(db),
     project.id ? loadCrm(db, project.id) : Promise.resolve({ submissions: [] as Row[], deals: [] as Row[] }),
-    loadSignals(db), loadAssets(db),
+    loadSignals(db), loadAssets(db), loadActions(db, f, actionTypes),
   ]);
   const report = buildProjectReport({
-    metaRows, campaignIds: project.campaignIds, range: { from: f.from, to: f.to }, entities, ...crm, stageOverrides: stageOverridesFrom(assets.rows),
+    metaRows, campaignIds: project.campaignIds, range: { from: f.from, to: f.to }, entities, ...crm, actions, goal: project.goal, stageOverrides: stageOverridesFrom(assets.rows),
   });
   const camps = project.campaignIds ? new Set(project.campaignIds) : null;
   const signals = sig.rows.filter((s) => !camps || camps.has(String(s.numbers?.campaign_id ?? (s.level === 'campaign' ? s.entity_id : ''))));
