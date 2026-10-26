@@ -10,6 +10,8 @@ export const metadata: Metadata = {
   title: { default: 'Cohort OS', template: '%s · Cohort OS' },
   description: 'Báo cáo master Meta Ads → HubSpot (dùng cá nhân)',
   robots: { index: false, follow: false },
+  // Commit đang chạy (Vercel tự cấp) — xem nhanh bản deploy nào đang live
+  other: { 'cohort-build': process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? 'local' },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
