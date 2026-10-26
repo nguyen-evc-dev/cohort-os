@@ -17,8 +17,12 @@ export async function fetchAll(build: (from: number, to: number) => PromiseLike<
 }
 
 const META_COLS = 'date,ad_id,campaign_id,campaign_name,adset_id,adset_name,ad_name,creative_concept,concept_key,creative_format,funnel_stage,spend,impressions,link_clicks,leads_meta,purchases_meta,landing_page_views,thruplay,provisional';
-/** Cột thêm ở migration conversion_goals (chưa đẩy migration thì đọc không có). */
-const META_COLS_NEW = `${META_COLS},video_3s,outbound_clicks`;
+/** Cột thêm theo migration (mới nhất trước). DB chưa có cột → thử bộ cột cũ hơn. */
+const META_COLS_TIERS = [
+  `${META_COLS},video_3s,outbound_clicks,video_p25,video_p50,video_p75,video_p100`, // video_retention
+  `${META_COLS},video_3s,outbound_clicks`, // conversion_goals
+  META_COLS,
+];
 
 export interface Workspace {
   projects: Row[];
@@ -52,7 +56,8 @@ export async function loadMeta(db: SupabaseClient, f: Pick<Filters, 'from' | 'to
     if (f.to) q = q.lte('date', f.to);
     return q.order('date').order('ad_id').range(a, b);
   });
-  try { return await run(META_COLS_NEW); } catch { return run(META_COLS); }
+  for (const cols of META_COLS_TIERS.slice(0, -1)) { try { return await run(cols); } catch { /* thử bộ cột cũ hơn */ } }
+  return run(META_COLS);
 }
 
 /** Chuyển đổi theo ad × ngày × loại (custom conversion…). Chưa có bảng (chưa đẩy migration) → rỗng. */

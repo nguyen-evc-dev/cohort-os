@@ -19,6 +19,8 @@ export interface DateRange { from?: string | null; to?: string | null }
 export interface MetaMetrics {
   spend: number; impressions: number; clicks: number; leads: number; purchases: number; lpv: number;
   video3s: number; thruplay: number; outbound: number;
+  /** Lượt xem tới 25/50/75/100% độ dài video */
+  videoP25: number; videoP50: number; videoP75: number; videoP100: number;
   ctr: number | null; cpm: number | null; cpc: number | null; cpl: number | null; cpaMeta: number | null;
   /** lượt xem 3 giây / impression */
   hookRate: number | null;
@@ -26,6 +28,8 @@ export interface MetaMetrics {
   holdRate: number | null;
   /** landing page view / link click */
   lpvRate: number | null;
+  /** Xem tới 25/50/75/100% / lượt xem 3 giây (đường giữ chân của video) */
+  p25Rate: number | null; p50Rate: number | null; p75Rate: number | null; p100Rate: number | null;
 }
 export interface CrmMetrics {
   leads: number; tracked: number; seats: number; programs: number;
@@ -50,7 +54,7 @@ export interface ReportNode extends Metrics {
 }
 
 export interface DayPoint {
-  date: string; spend: number; impressions: number; clicks: number; lpv: number; video3s: number; thruplay: number;
+  date: string; spend: number; impressions: number; clicks: number; lpv: number; video3s: number; thruplay: number; videoP50: number;
   leadsMeta: number; purchasesMeta: number; crmLeads: number; seats: number; provisional: boolean;
   /** key bước → số lượng trong ngày (Meta theo ngày phát sinh, CRM theo ngày đăng ký của lead) */
   steps: Record<string, number>;
@@ -113,11 +117,11 @@ const rnd = (v: number | null, d = 2): number | null => (v === null ? null : Mat
 const n = (v: unknown): number => { const x = Number(v); return Number.isFinite(x) ? x : 0; };
 
 // ---------- Bộ cộng dồn ----------
-interface RawMeta { spend: number; impressions: number; clicks: number; leads: number; purchases: number; lpv: number; video3s: number; thruplay: number; outbound: number; steps: Record<string, number> }
+interface RawMeta { spend: number; impressions: number; clicks: number; leads: number; purchases: number; lpv: number; video3s: number; thruplay: number; outbound: number; p25: number; p50: number; p75: number; p100: number; steps: Record<string, number> }
 interface RawCrm { leads: number; tracked: number; seats: number; programs: number; seatRevenue: number; programRevenue: number; steps: Record<string, { count: number; value: number }> }
-const emptyMeta = (): RawMeta => ({ spend: 0, impressions: 0, clicks: 0, leads: 0, purchases: 0, lpv: 0, video3s: 0, thruplay: 0, outbound: 0, steps: {} });
+const emptyMeta = (): RawMeta => ({ spend: 0, impressions: 0, clicks: 0, leads: 0, purchases: 0, lpv: 0, video3s: 0, thruplay: 0, outbound: 0, p25: 0, p50: 0, p75: 0, p100: 0, steps: {} });
 const emptyCrm = (): RawCrm => ({ leads: 0, tracked: 0, seats: 0, programs: 0, seatRevenue: 0, programRevenue: 0, steps: {} });
-const NUM_META = ['spend', 'impressions', 'clicks', 'leads', 'purchases', 'lpv', 'video3s', 'thruplay', 'outbound'] as const;
+const NUM_META = ['spend', 'impressions', 'clicks', 'leads', 'purchases', 'lpv', 'video3s', 'thruplay', 'outbound', 'p25', 'p50', 'p75', 'p100'] as const;
 const NUM_CRM = ['leads', 'tracked', 'seats', 'programs', 'seatRevenue', 'programRevenue'] as const;
 
 function addMeta(a: RawMeta, b: RawMeta) {
@@ -136,9 +140,11 @@ function finishMeta(m: RawMeta): MetaMetrics {
   return {
     spend: round2(m.spend) as number, impressions: m.impressions, clicks: m.clicks, leads: m.leads, purchases: m.purchases, lpv: m.lpv,
     video3s: m.video3s, thruplay: m.thruplay, outbound: m.outbound,
+    videoP25: m.p25, videoP50: m.p50, videoP75: m.p75, videoP100: m.p100,
     ctr: rnd(div(m.clicks, m.impressions), 4), cpm: rnd(m.impressions ? (m.spend / m.impressions) * 1000 : null), cpc: rnd(div(m.spend, m.clicks)),
     cpl: rnd(div(m.spend, m.leads)), cpaMeta: rnd(div(m.spend, m.purchases)),
     hookRate: rnd(div(m.video3s, m.impressions), 4), holdRate: rnd(div(m.thruplay, m.video3s), 4), lpvRate: rnd(div(m.lpv, m.clicks), 4),
+    p25Rate: rnd(div(m.p25, m.video3s), 4), p50Rate: rnd(div(m.p50, m.video3s), 4), p75Rate: rnd(div(m.p75, m.video3s), 4), p100Rate: rnd(div(m.p100, m.video3s), 4),
   };
 }
 function finishCrm(c: RawCrm, spend: number): CrmMetrics {
@@ -254,7 +260,7 @@ interface AdAcc {
   id: string; name: string; adsetId: string; campaignId: string; concept: string; conceptKey: string; format: string; stage: string; status: string;
   meta: RawMeta; crm: RawCrm; latest: string;
 }
-const emptyDay = (date: string): DayPoint => ({ date, spend: 0, impressions: 0, clicks: 0, lpv: 0, video3s: 0, thruplay: 0, leadsMeta: 0, purchasesMeta: 0, crmLeads: 0, seats: 0, provisional: false, steps: {} });
+const emptyDay = (date: string): DayPoint => ({ date, spend: 0, impressions: 0, clicks: 0, lpv: 0, video3s: 0, thruplay: 0, videoP50: 0, leadsMeta: 0, purchasesMeta: 0, crmLeads: 0, seats: 0, provisional: false, steps: {} });
 
 export function buildProjectReport(input: ReportInput): ProjectReport {
   const range = input.range || {};
@@ -292,7 +298,8 @@ export function buildProjectReport(input: ReportInput): ProjectReport {
     }
     const row: RawMeta = {
       spend: n(r.spend), impressions: n(r.impressions), clicks: n(r.link_clicks), leads: n(r.leads_meta), purchases: n(r.purchases_meta),
-      lpv: n(r.landing_page_views), video3s: n(r.video_3s), thruplay: n(r.thruplay), outbound: n(r.outbound_clicks), steps: {},
+      lpv: n(r.landing_page_views), video3s: n(r.video_3s), thruplay: n(r.thruplay), outbound: n(r.outbound_clicks),
+      p25: n(r.video_p25), p50: n(r.video_p50), p75: n(r.video_p75), p100: n(r.video_p100), steps: {},
     };
     for (const s of metaSteps) { const c = metaStepCount(s, r, actionsIdx); if (c) row.steps[s.key] = c; }
     addMeta(a.meta, row);
@@ -300,7 +307,7 @@ export function buildProjectReport(input: ReportInput): ProjectReport {
     adsets.set(String(r.adset_id), { id: String(r.adset_id), name: r.adset_name || adsets.get(String(r.adset_id))?.name || '', campaignId: String(r.campaign_id) });
     campaigns.set(String(r.campaign_id), { id: String(r.campaign_id), name: r.campaign_name || '' });
     const d = daily.get(r.date) || emptyDay(r.date);
-    d.spend += row.spend; d.impressions += row.impressions; d.clicks += row.clicks; d.lpv += row.lpv; d.video3s += row.video3s; d.thruplay += row.thruplay;
+    d.spend += row.spend; d.impressions += row.impressions; d.clicks += row.clicks; d.lpv += row.lpv; d.video3s += row.video3s; d.thruplay += row.thruplay; d.videoP50 += row.p50;
     d.leadsMeta += row.leads; d.purchasesMeta += row.purchases;
     for (const [k, v] of Object.entries(row.steps)) d.steps[k] = (d.steps[k] || 0) + v;
     if (r.provisional) { d.provisional = true; provisional.add(String(r.date)); }

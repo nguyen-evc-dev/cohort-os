@@ -24,6 +24,11 @@ export interface PushResult {
 }
 
 const INT_COLS = ['impressions', 'reach', 'link_clicks', 'landing_page_views', 'leads_meta', 'purchases_meta', 'thruplay'];
+/** Cột thêm theo từng migration — DB chưa có thì bỏ dần từ mới nhất (sync không chết vì quên db push). */
+const OPTIONAL_COLS: { migration: string; cols: string[] }[] = [
+  { migration: 'video_retention', cols: ['video_p25', 'video_p50', 'video_p75', 'video_p100'] },
+  { migration: 'conversion_goals', cols: ['video_3s', 'outbound_clicks'] },
+];
 const blankToNull = (v: unknown) => (v === '' || v === undefined ? null : v);
 
 /** Các kiểm tra chặn ghi. Trả danh sách lỗi (rỗng = hợp lệ). */
@@ -59,6 +64,7 @@ export function toDailyRows(batch: Batch, accountId: string, nowIso: string, ptT
     const d = importAdRowToDaily(r, accountId, nowIso);
     d.video_3s = Math.round(Number(r.video_3s) || 0);
     d.outbound_clicks = Math.round(Number(r.outbound_clicks) || 0);
+    for (const c of OPTIONAL_COLS[0].cols) d[c] = Math.round(Number(r[c]) || 0);
     for (const c of INT_COLS) d[c] = Math.round(Number(d[c]) || 0);
     const parsed = parseAdName(r.ad_name);
     return {
@@ -151,14 +157,19 @@ export async function pushBatch(store: Store, batch: Batch, opts: PushOptions = 
     const creatives = batch.creatives.map((c) => ({ ...c, fetched_at: nowIso }));
     const events = toBudgetEvents(batch, tz);
 
-    try { await store.upsert('meta_ads_daily', daily, 'date,ad_id'); }
-    catch (e) {
-      if (!isMissingSchema(e)) throw e;
-      // DB chưa có cột video_3s / outbound_clicks (chưa đẩy migration conversion_goals) → ghi phần cũ
-      await store.upsert('meta_ads_daily', daily.map(({ video_3s: _v, outbound_clicks: _o, ...rest }) => rest), 'date,ad_id');
-      warnings.push('DB chưa có migration conversion_goals: bỏ qua video_3s, outbound_clicks, chuyển đổi custom. Chạy npx supabase db push --linked');
+    let missingGoals = false;
+    for (let i = 0, drop: string[] = []; ; i++) {
+      try { await store.upsert('meta_ads_daily', drop.length ? daily.map((r) => Object.fromEntries(Object.entries(r).filter(([k]) => !drop.includes(k)))) : daily, 'date,ad_id'); break; }
+      catch (e) {
+        if (!isMissingSchema(e) || i >= OPTIONAL_COLS.length) throw e;
+        // DB chưa có cột của migration mới → bỏ các cột đó, ghi phần còn lại
+        const m = OPTIONAL_COLS[i];
+        drop = [...drop, ...m.cols];
+        if (m.migration === 'conversion_goals') missingGoals = true;
+        warnings.push(`DB chưa có migration ${m.migration}: bỏ qua ${m.cols.join(', ')}${m.migration === 'conversion_goals' ? ', chuyển đổi custom' : ''}. Chạy npx supabase db push --linked`);
+      }
     }
-    if (!warnings.length) {
+    if (!missingGoals) {
       try {
         await store.replaceActions(batch.meta.date_from, batch.meta.date_to, batch.actionRows);
         rows.actions = batch.actionRows.length;

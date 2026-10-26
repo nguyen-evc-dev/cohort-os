@@ -21,7 +21,7 @@ const webinar: ProjectGoal = parseGoal({
 const row = (date: string, ad: string, spend: number) => ({
   date, ad_id: ad, campaign_id: CAMP, campaign_name: 'COACH-WBN-RE-PC-SAC', adset_id: '120252703228760233', adset_name: 'MOF', ad_name: ad === AD1 ? 'Video ban doc_WARM' : 'Photo KV_WARM',
   creative_concept: ad === AD1 ? 'Video ban doc' : 'Photo KV', concept_key: ad === AD1 ? 'video ban doc' : 'photo kv', creative_format: ad === AD1 ? 'video' : 'photo',
-  spend, impressions: 1000, link_clicks: 20, leads_meta: 9, purchases_meta: 9, landing_page_views: 15, video_3s: 300, thruplay: 60, provisional: false,
+  spend, impressions: 1000, link_clicks: 20, leads_meta: 9, purchases_meta: 9, landing_page_views: 15, video_3s: 300, thruplay: 60, video_p25: 200, video_p50: 150, video_p75: 90, video_p100: 30, provisional: false,
 });
 const metaRows = [row('2026-10-20', AD1, 60), row('2026-10-20', AD2, 40), row('2026-10-21', AD1, 50)];
 const actions = [
@@ -95,7 +95,7 @@ describe('báo cáo theo mục tiêu Webinar (custom conversion, không theo Lea
     expect(r.daily.map((d) => [d.date, d.steps.checkout ?? 0, d.steps.purchased ?? 0, d.steps.seat ?? 0])).toEqual([
       ['2026-10-20', 5, 2, 2], ['2026-10-21', 2, 1, 0],
     ]);
-    expect(r.total.meta).toMatchObject({ video3s: 900, thruplay: 180, hookRate: 0.3, holdRate: 0.2 });
+    expect(r.total.meta).toMatchObject({ video3s: 900, thruplay: 180, hookRate: 0.3, holdRate: 0.2, videoP50: 450, p25Rate: 0.6667, p50Rate: 0.5, p75Rate: 0.3, p100Rate: 0.1 });
   });
   it('chưa có CRM: bước chính CRM → tạm dùng bước Meta cuối, bước cuối "Chờ CRM"', () => {
     const g = parseGoal({ ...webinar, primary: 'seat' });

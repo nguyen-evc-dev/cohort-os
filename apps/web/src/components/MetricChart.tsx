@@ -25,6 +25,7 @@ export function metricCatalog(steps: ChartStep[], relative: boolean): MetricDef[
     { id: 'lpvRate', label: 'Tỉ lệ vào trang (LPV/click)', kind: 'pct', get: (d) => div(d.lpv, d.clicks) },
     { id: 'hookRate', label: 'Hook rate (3s / impr)', kind: 'pct', get: (d) => div(d.video3s, d.impressions) },
     { id: 'holdRate', label: 'Hold rate (ThruPlay / 3s)', kind: 'pct', get: (d) => div(d.thruplay, d.video3s) },
+    { id: 'p50Rate', label: 'Xem 50% video (/ 3s)', kind: 'pct', get: (d) => div(d.videoP50 ?? 0, d.video3s) },
   ];
   if (!relative) {
     base.push({ id: 'cpm', label: 'CPM', kind: 'money', get: (d) => (d.impressions ? (d.spend / d.impressions) * 1000 : null) });

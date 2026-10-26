@@ -155,6 +155,8 @@ export function readInbox(dir: string): Batch {
       link_clicks: num(r.link_click), link_ctr: num(r.website_ctr), cpm: money(r.cpm), leads: num(r.lead),
       purchases: num(r.omni_purchase), landing_page_views: num(r.landing_page_view), thruplay: num(r.video_thruplay_watched_actions),
       outbound_clicks: num(r.outbound_clicks), video_3s: 0,
+      video_p25: num(r.video_p25_watched_actions), video_p50: num(r.video_p50_watched_actions),
+      video_p75: num(r.video_p75_watched_actions), video_p100: num(r.video_p100_watched_actions),
     });
     const counts = deriveCounts(money(r.amount_spent), costPerActions(r));
     adRows[adRows.length - 1].video_3s = counts.video_view || 0;

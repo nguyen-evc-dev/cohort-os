@@ -40,6 +40,7 @@ function inbox(adCost: Record<string, string>, accCost: Record<string, string>):
   w('meta.json', { mode: 'daily', account_id: ACC, date_from: '2026-10-24', date_to: '2026-10-24' });
   w('ads.json', [{ date_start: '2026-10-24', id: AD, name: 'Video ban doc_WARM_MOF', campaign_id: CAMP, campaign_name: 'COACH-WBN-RE-PC-SAC',
     adset_id: '120252703228760233', adset_name: 'MOF', objective: 'OUTCOME_SALES', amount_spent: usd(30), impressions: '1000', outbound_clicks: '12',
+    video_p25_watched_actions: '120', video_p50_watched_actions: '80', video_p75_watched_actions: '50', video_p100_watched_actions: '30',
     ...Object.fromEntries(Object.entries(adCost).map(([k, v]) => [`cost_per_action_type:${k}`, v])) }]);
   w('account.json', [{ date_start: '2026-10-24', amount_spent: usd(30), ...Object.fromEntries(Object.entries(accCost).map(([k, v]) => [`cost_per_action_type:${k}`, v])) }]);
   w('customconversions.json', [{ id: '2050096562303283', name: 'WBN1126 - Check Out', custom_event_type: 'INITIATED_CHECKOUT', is_archived: false, last_fired_time: '2026-10-24T21:19:54-07:00', default_conversion_value: 0, pixel_rule: '{"x":1}' }]);
@@ -47,13 +48,28 @@ function inbox(adCost: Record<string, string>, accCost: Record<string, string>):
 }
 
 describe('sync:push ghi chuyển đổi', () => {
+  it('DB chưa có cột video_pXX (chưa db push) → bỏ cột đó, vẫn ghi phần còn lại + cảnh báo', async () => {
+    const store = new MemoryStore();
+    const orig = store.upsert.bind(store);
+    store.upsert = async (table, rows, onConflict) => {
+      if (table === 'meta_ads_daily' && rows.some((r) => 'video_p50' in r)) throw new Error("Could not find the 'video_p50' column of 'meta_ads_daily' in the schema cache");
+      return orig(table, rows, onConflict);
+    };
+    const res = await pushBatch(store, readInbox(inbox({ [CHECKOUT]: '10', video_view: '0.1' }, { [CHECKOUT]: '10' })), { now: new Date('2026-10-25T08:00:00Z'), accountId: ACC });
+    expect(res.status).toBe('ok');
+    expect(store.t('meta_ads_daily')[0]).toMatchObject({ video_3s: 300, outbound_clicks: 12 });
+    expect(store.t('meta_ads_daily')[0]).not.toHaveProperty('video_p50');
+    expect(store.t('meta_actions_daily')).toHaveLength(1);
+    expect(res.warnings).toEqual([expect.stringMatching(/video_retention/)]);
+  });
+
   it('ghi meta_actions_daily, video_3s, outbound, danh mục custom conversion', async () => {
     const store = new MemoryStore();
     const res = await pushBatch(store, readInbox(inbox({ [CHECKOUT]: '10', [PURCHASED]: '15', video_view: '0.1' }, { [CHECKOUT]: '10' })),
       { now: new Date('2026-10-25T08:00:00Z'), accountId: ACC });
     expect(res.status).toBe('ok');
     expect(store.t('meta_actions_daily').map((a) => [a.action_type, a.count]).sort()).toEqual([[PURCHASED, 2], [CHECKOUT, 3]].sort());
-    expect(store.t('meta_ads_daily')[0]).toMatchObject({ video_3s: 300, outbound_clicks: 12 });
+    expect(store.t('meta_ads_daily')[0]).toMatchObject({ video_3s: 300, outbound_clicks: 12, video_p25: 120, video_p50: 80, video_p75: 50, video_p100: 30 });
     expect(store.t('meta_custom_conversions')[0]).toMatchObject({ id: '2050096562303283', name: 'WBN1126 - Check Out', event_type: 'INITIATED_CHECKOUT', is_archived: false });
     expect(store.t('meta_custom_conversions')[0]).not.toHaveProperty('pixel_rule');
     expect(res.warnings).toEqual([]);

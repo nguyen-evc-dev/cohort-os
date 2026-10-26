@@ -57,3 +57,8 @@ export function slugify(name: string): string {
   return name.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd')
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
 }
+
+/** "Check Out (điền form)" → nhãn chi phí: CPL nếu bước là lead / đăng ký, còn lại CPA. */
+export function costLabel(stepLabel: string): string {
+  return /lead|đăng ký|dang ky|form|regist|check ?out/i.test(stepLabel) ? 'CPL' : 'CPA';
+}

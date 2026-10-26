@@ -166,6 +166,12 @@ table.data tfoot td { position: sticky; bottom: 0; background: var(--surface); f
 .density { display: flex; gap: 8px; align-items: center; justify-content: flex-end; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--muted); }
 .density button { margin: 0; width: auto; padding: 3px 10px; font-size: 12px; }
 .density input { width: 200px; padding: 4px 8px; font-size: 12.5px; }
+.density .seg.presets button { margin: 0; border: 0; border-right: 1px solid var(--border); border-radius: 0; background: transparent; color: var(--muted); padding: 5px 11px; font: 500 12.5px var(--font-display); }
+.density .seg.presets button:last-child { border-right: 0; }
+.density .seg.presets button:hover { background: var(--surface-2); color: var(--text); }
+.density .seg.presets button[aria-selected=true] { background: var(--surface-2); color: var(--crm); font-weight: 600; }
+.preset-hint { padding: 6px 12px; font-size: 12px; color: var(--faint); border-bottom: 1px solid var(--border); }
+.capturing .preset-hint { display: none; }
 
 /* ---------- Biểu đồ ---------- */
 .chart { width: 100%; height: auto; display: block; }

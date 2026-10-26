@@ -52,7 +52,7 @@ Phân trang: nếu kết quả có `pagination.next_cursor` thì gọi lại v�
 
 **2a. Số liệu theo ad × ngày** → `ads.json`. `ads_get_ad_entities`:
 - `level = "ad"`, `time_range` như trên, `time_increment = "1"`, `limit = 1000`, `reporting_purpose = ["metric_lookup"]`
-- `fields = ["id","name","campaign_id","campaign_name","adset_id","adset_name","objective","effective_status","amount_spent","impressions","reach","frequency","link_click","website_ctr","cpm","lead","omni_purchase","landing_page_view","video_thruplay_watched_actions","outbound_clicks","cost_per_action_type"]`
+- `fields = ["id","name","campaign_id","campaign_name","adset_id","adset_name","objective","effective_status","amount_spent","impressions","reach","frequency","link_click","website_ctr","cpm","lead","omni_purchase","landing_page_view","video_thruplay_watched_actions","video_p25_watched_actions","video_p50_watched_actions","video_p75_watched_actions","video_p100_watched_actions","outbound_clicks","cost_per_action_type"]`
 - `filtering = [{"field":"ad.amount_spent","operator":"GREATER_THAN","value":["0"]}]`
 - `cost_per_action_type` trả về nhiều khóa dạng `"cost_per_action_type:<loại>"`. **Chỉ giữ** các khóa có `<loại>` bắt đầu bằng `offsite_conversion.custom.` hoặc `offsite_conversion.fb_pixel_`, hoặc đúng bằng `video_view`, `lead`. **Bỏ** mọi khóa `cost_per_action_type:` khác và các khóa `cost_per_*` lẻ (vd `cost_per_omni_purchase`). Script tự suy ra số chuyển đổi = spend / cost.
 

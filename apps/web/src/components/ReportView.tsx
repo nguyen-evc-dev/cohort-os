@@ -1,15 +1,12 @@
 import type { ProjectReport } from '@cohort/core';
-import { DASH, fmtInt, fmtMoney, fmtPct, fmtRoas } from '@/lib/format';
+import { costLabel, DASH, fmtInt, fmtMoney, fmtPct, fmtRoas } from '@/lib/format';
 import { Chip, Tile, TruthGap } from '@/components/ui';
 import { ReportTable } from '@/components/ReportTable';
 import { MetricChart } from '@/components/MetricChart';
 
 type Src = 'meta' | 'crm' | 'both';
 
-/** "Check Out (điền form)" → nhãn chi phí: CPL nếu bước là lead / đăng ký, còn lại CPA. */
-export function costLabel(stepLabel: string): string {
-  return /lead|đăng ký|dang ky|form|regist|check ?out/i.test(stepLabel) ? 'CPL' : 'CPA';
-}
+export { costLabel };
 
 /**
  * Thân báo cáo Project (đo theo mục tiêu): bước chính + chi phí → chuỗi bước → giá trị bước cuối → biểu đồ → bảng.
@@ -87,8 +84,8 @@ export function ReportView({ r, src, hideMoney = false, allowExport = true, file
       {r.tree.length === 0
         ? <div className="panel empty"><h3>Không có chi tiêu trong khoảng này</h3><p>Thử chọn “30 ngày” hoặc “Tất cả”.</p></div>
         : <ReportTable tree={r.tree} total={r.total} unattributed={r.unattributed} hasCrm={r.hasCrm} src={src}
-            steps={r.steps.map((s) => ({ key: s.key, label: s.label, source: s.source }))} primaryKey={p.key} finalKey={r.final.key}
-            hasCompare={!!r.goal.compare} baselineCost={hideMoney ? null : (r.goal.target_cost ?? p.cost)} fileName={fileName} allowExport={allowExport && !hideMoney} />}
+            steps={r.steps.map((s) => ({ key: s.key, label: s.label, source: s.source, count: s.count, available: s.available }))} primaryKey={p.key} finalKey={r.final.key}
+            compare={r.goal.compare} storageKey={storageKey} baselineCost={hideMoney ? null : (r.goal.target_cost ?? p.cost)} fileName={fileName} allowExport={allowExport && !hideMoney} />}
 
       {r.hasCrm && showCrm && r.placements.length > 0 && (
         <>
