@@ -40,6 +40,8 @@ export interface MetaReportResult {
 
 const norm = (s: unknown): string => String(s ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
 const ID_RE = /^\d{6,25}$/;
+/** Ô của bảng: file thật cho chuỗi; test / nguồn khác có thể cho số. */
+export type Cell = string | number | null | undefined;
 
 /** Tên cột (đã chuẩn hóa) → trường. Hỗ trợ giao diện tiếng Anh và vài nhãn tiếng Việt thường gặp. */
 const ALIASES: Record<string, string[]> = {
@@ -68,7 +70,7 @@ const PREFIX: [string, string][] = [['spend', 'amount spent'], ['spend', 'số t
 /** Cột đã biết là chỉ số thường (để không nhầm với custom conversion) */
 const KNOWN_METRIC_WORDS = /^(results?|result type|cost per .*|purchases?|website purchases|purchases conversion value|website purchases conversion value|result value type|results value|results roas|unique link clicks|post engagements|facebook likes|post reactions|post comments|post saves|post shares|hook|thruplay rate|hold rate.*|video plays at .*|results \(initial\)|reporting (starts|ends)|ctr .*|cpc .*|cpm .*)$/;
 
-function fieldFor(header: string): string | null {
+function fieldFor(header: Cell): string | null {
   const h = norm(header);
   if (!h) return null;
   for (const [f, names] of Object.entries(ALIASES)) if (names.includes(h)) return f;
@@ -86,7 +88,7 @@ export function parseReportDate(v: string): string | null {
   return null;
 }
 
-const cellNum = (v: string | undefined): number => {
+const cellNum = (v: Cell): number => {
   const s = String(v ?? '').trim().replace(/^\$/, '');
   if (!s) return 0;
   const x = Number(/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(s) ? s.replace(/,/g, '') : s);
@@ -94,7 +96,7 @@ const cellNum = (v: string | undefined): number => {
 };
 const r2 = (x: number) => Math.round(x * 100) / 100;
 
-export function parseMetaReport(table: string[][], opts: MetaReportOptions): MetaReportResult {
+export function parseMetaReport(table: Cell[][], opts: MetaReportOptions): MetaReportResult {
   const out: MetaReportResult = {
     ok: false, problems: [], warnings: [], rows: [], actions: [], campaigns: [], dateFrom: null, dateTo: null, days: 0,
     totals: { spend: 0, impressions: 0 }, fileTotals: { spend: null, impressions: null }, customUsed: [], customUnknown: [],
@@ -117,11 +119,11 @@ export function parseMetaReport(table: string[][], opts: MetaReportOptions): Met
   out.customUnknown = unknown;
   if (unknown.length) out.warnings.push(`Cột "${unknown.join('", "')}" trông như custom conversion nhưng chưa có trong danh mục (meta_custom_conversions) nên đã bỏ qua.`);
 
-  const get = (row: string[], f: string): string => (col[f] === undefined ? '' : String(row[col[f]] ?? '').trim());
+  const get = (row: Cell[], f: string): string => (col[f] === undefined ? '' : String(row[col[f]] ?? '').trim());
   const data = table.slice(1).filter((r) => r.some((c) => String(c ?? '').trim() !== ''));
 
   // Dòng tổng của file: không có tên và không có ID
-  const isTotal = (r: string[]) => !get(r, 'ad_id') && !get(r, 'campaign_id') && !get(r, 'ad_name') && !get(r, 'campaign_name');
+  const isTotal = (r: Cell[]) => !get(r, 'ad_id') && !get(r, 'campaign_id') && !get(r, 'ad_name') && !get(r, 'campaign_name');
   const totalRow = data.find(isTotal);
   if (totalRow) {
     out.fileTotals.spend = cellNum(get(totalRow, 'spend'));

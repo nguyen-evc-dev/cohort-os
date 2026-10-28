@@ -20,7 +20,9 @@
     "sync:weekly": "tsx apps/sync/src/cli/weekly.ts",
     "sync:snapshots": "tsx apps/sync/src/cli/snapshots.ts",
     "import:meta": "tsx apps/sync/src/cli/import-meta.ts",
-    "sync:signals": "tsx apps/sync/src/cli/signals.ts"
+    "sync:signals": "tsx apps/sync/src/cli/signals.ts",
+    "build:bot": "node apps/bot/scripts/build-core.mjs",
+    "check:bot": "node apps/bot/scripts/build-core.mjs --check"
   },
   "devDependencies": {
     "tsx": "^4.20.0"

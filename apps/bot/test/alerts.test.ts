@@ -1,64 +1,8 @@
 /**
- * Test Bé Sugar: nạp các file Apps Script (src/*.js) vào 1 sandbox vm giả lập
- * PropertiesService / UrlFetchApp / Utilities / LockService.
+ * Test nhắc việc Bé Sugar (T1.5) trên sandbox Apps Script dùng chung (test/gas.ts).
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import fs from 'node:fs';
-import path from 'node:path';
-import vm from 'node:vm';
-import { fileURLToPath } from 'node:url';
-
-const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src');
-
-function fmt(d: Date, tz: string): string {
-  const p: Record<string, string> = {};
-  for (const x of new Intl.DateTimeFormat('en-CA', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).formatToParts(d)) p[x.type] = x.value;
-  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}`;
-}
-
-interface Sandbox { [k: string]: any }
-function loadGas(opts: { now: string; props?: Record<string, string>; db?: Record<string, any[]> }) {
-  const props: Record<string, string> = {
-    SUPABASE_URL: 'https://x.supabase.co', SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_x', BOT_TOKEN: 't'.repeat(43),
-    AGENT_WEBHOOKS: JSON.stringify({ alerts: 'https://chat.googleapis.com/v1/spaces/AAA/messages?key=k&token=t' }),
-    WEB_BASE_URL: 'http://localhost:3100', ...(opts.props || {}),
-  };
-  const posted: any[] = [];
-  const reads: any[] = [];
-  const RealDate = Date;
-  const fixed = new RealDate(opts.now).getTime();
-  class FakeDate extends RealDate {
-    constructor(...a: any[]) { super(...((a.length ? a : [fixed]) as [])); }
-    static now() { return fixed; }
-  }
-  const sb: Sandbox = {
-    Date: FakeDate, JSON, Math, Number, String, Error, console,
-    PropertiesService: { getScriptProperties: () => ({
-      getProperty: (k: string) => (k in props ? props[k] : null),
-      setProperty: (k: string, v: string) => { props[k] = v; },
-      deleteProperty: (k: string) => { delete props[k]; },
-    }) },
-    LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock: () => {} }) },
-    Utilities: { formatDate: (d: Date, tz: string, f: string) => (f === 'yyyy-MM-dd' ? fmt(d, tz).slice(0, 10) : fmt(d, tz)) },
-    Logger: { log: () => {} },
-    UrlFetchApp: { fetch: (url: string, o: any) => {
-      const body = JSON.parse(o.payload);
-      if (url.includes('/rpc/bot_read')) {
-        reads.push(body);
-        expect(o.headers.apikey).toBe('sb_publishable_x');
-        const rows = (opts.db || {})[body.p_view] || [];
-        return { getResponseCode: () => 200, getContentText: () => JSON.stringify(rows) };
-      }
-      posted.push({ url, body });
-      return { getResponseCode: () => 200, getContentText: () => '{}' };
-    } },
-  };
-  vm.createContext(sb);
-  for (const f of ['Logic.js', 'Config.js', 'Supabase.js', 'Cards.js', 'Alerts.js', 'Chat.js']) {
-    vm.runInContext(fs.readFileSync(path.join(SRC, f), 'utf8'), sb, { filename: f });
-  }
-  return { sb, props, posted, reads };
-}
+import { loadGas } from './gas';
 
 const okRun = (id: string, target: string, finished: string, extra: Record<string, unknown> = {}) =>
   ({ id, kind: 'meta', target_date: target, status: 'ok', started_at: finished, finished_at: finished, rows: 120, problems: null, note: null, ...extra });

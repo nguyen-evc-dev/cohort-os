@@ -1,43 +1,63 @@
 /**
- * Bé Sugar — Chat App nhận lệnh. Lệnh thật (đọc dữ liệu, gọi Claude) làm ở T4.x.
- * GIỮ NGUYÊN Deployment ID khi cập nhật code (Deploy → Manage deployments → Edit → New version).
+ * Bé Sugar — Chat App nhận lệnh (T4.1). GIỮ NGUYÊN Deployment ID khi cập nhật code
+ * (Deploy → Manage deployments → Edit → New version).
+ *
+ * Luồng: kiểm tra quyền (chỉ email admin, chỉ trong space đã cấu hình hoặc DM) → trả lời ngay "Em đang xem nha…"
+ * → xếp việc (Jobs.js) → trigger 1 lần chạy lệnh và gửi kết quả vào thread qua webhook của agent (Sugar Analyst / RYG / Auditor).
  */
 
-var COMMANDS = { 1: '/campaigns', 2: '/report', 3: '/ryg', 4: '/analyze', 5: '/audit', 6: '/help' };
+var ACK_ = {
+  campaigns: '📋 Em xem danh sách campaign nha…',
+  report: '🔎 Em đang xem nha…',
+  ryg: '🚦 Em xem đèn đỏ-vàng-xanh nha…',
+  analyze: '🔎 Em đang phân tích, chờ em một chút nha…',
+  audit: '🛡️ Em đang soát chính sách, khoảng một phút nha…'
+};
 
 function reply_(text) {
   return { hostAppDataAction: { chatDataAction: { createMessageAction: { message: { text: text } } } } };
 }
 
-// Tạm: chỉ chặn khi Google gửi kèm email và email đó không phải admin. T4.1 sẽ chặn chặt hơn.
-function isDenied_(event) {
-  var email = event && event.chat && event.chat.user && event.chat.user.email;
-  return !!email && email !== adminEmail_();
-}
-
 function helpText_() {
   return 'Em là Bé Sugar 🍬\n' +
     '/campaigns: danh sách campaign đang chạy\n' +
-    '/report <campaign>: báo cáo nhanh\n' +
-    '/ryg: đèn đỏ-vàng-xanh\n' +
-    '/analyze <campaign>: phân tích sâu\n' +
-    '/audit <campaign|ad>: audit chính sách / SAC / landing page\n' +
-    'Tin tự động: em báo khi số Meta về (14:05/15:05) và nhắc anh xuất HubSpot.';
+    '/report <project|campaign> [7d|30d|all]: báo cáo nhanh theo mục tiêu của Project\n' +
+    '/ryg [project]: đèn đỏ-vàng-xanh + việc nên làm\n' +
+    '/analyze <câu hỏi>: phân tích sâu (hỏi tự do cũng được)\n' +
+    '/audit <campaign|ad|ID>: soát chính sách / SAC / landing page\n' +
+    'Anh cũng có thể @Bé Sugar và gõ câu hỏi bình thường, em tự chọn lệnh phù hợp.\n' +
+    'Tin tự động: em báo khi số Meta về và nhắc anh xuất HubSpot. Em chỉ xem số, không thay đổi gì trên tài khoản quảng cáo.';
 }
 
-function onMessage(event) {
-  if (isDenied_(event)) return reply_('Xin lỗi, em chỉ làm việc với sếp Nguyên nha.');
-  return reply_('Bé Sugar đã kết nối ✅ Gõ / để xem lệnh. (Các lệnh đang được xây, tin tự động đã chạy.)');
+function handleInbound_(event, isCommand) {
+  var info = eventInfo_(event);
+  var auth = authorize_(info);
+  if (!auth.ok) return reply_(auth.text);
+
+  var cmd, arg;
+  if (isCommand) {
+    cmd = COMMAND_BY_ID[info.commandId];
+    arg = info.text.replace(/^\/\S+\s*/, '');
+  } else {
+    var c = classifyIntent_(info.text);
+    cmd = c.cmd; arg = c.arg;
+  }
+  if (!cmd) return reply_('Em chưa hiểu lệnh này. Gõ /help để xem danh sách nha.');
+  if (cmd === 'help') return reply_(helpText_());
+  if (!webhookFor_(AGENT_FOR[cmd])) return reply_('Em chưa có webhook để trả lời (AGENT_WEBHOOKS trong Script Properties). Nhờ dev kiểm tra giúp em nha.');
+
+  var queued;
+  try { queued = enqueueJob_({ id: jobId_(info), cmd: cmd, arg: arg, thread: info.thread }); }
+  catch (e) { return reply_('Em chưa hẹn được lịch xử lý (' + String(e && e.message).slice(0, 80) + '). Thử lại giúp em nha.'); }
+  return reply_(queued ? ACK_[cmd] : 'Em đang xử lý lệnh này rồi, anh đợi em một chút nha.');
 }
 
-function onAppCommand(event) {
-  if (isDenied_(event)) return reply_('Xin lỗi, em chỉ làm việc với sếp Nguyên nha.');
-  var id = Number(event.chat.appCommandPayload.appCommandMetadata.appCommandId);
-  if (id === 6) return reply_(helpText_());
-  return reply_('Em đã nhận lệnh ' + (COMMANDS[id] || ('#' + id)) + ' ✅ Tính năng này đang được xây.');
-}
+function onMessage(event) { return handleInbound_(event, false); }
+function onAppCommand(event) { return handleInbound_(event, true); }
 
 function onAddedToSpace(event) {
+  var auth = authorize_(eventInfo_(event));
+  if (!auth.ok) return reply_(auth.text);
   return reply_('Chào sếp Nguyên! Bé Sugar đã vào space 🍬 Gõ /help để xem lệnh.');
 }
 

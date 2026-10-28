@@ -15,6 +15,7 @@ export * from './crm-payload';
 export * from './share';
 export * from './insight';
 export * from './snapshot';
+export * from './audit';
 export * from './table';
 export * from './meta-report';
 export * from './skills.generated';
