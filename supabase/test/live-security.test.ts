@@ -51,7 +51,7 @@ describe.skipIf(!live)('Supabase thật — bảo mật (chỉ đọc)', () => {
       }
     }
     expect(leaks).toEqual([]);
-  });
+  }, 60_000);
 
   it('anon không ghi được (projects)', async () => {
     const r = await rest('projects', PUBLISHABLE!, {

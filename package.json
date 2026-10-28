@@ -17,7 +17,10 @@
     "bot:token": "tsx apps/sync/src/cli/bot-token.ts",
     "build:skills": "node scripts/build-skills.mjs",
     "check:skills": "node scripts/build-skills.mjs --check",
-    "sync:weekly": "tsx apps/sync/src/cli/weekly.ts"
+    "sync:weekly": "tsx apps/sync/src/cli/weekly.ts",
+    "sync:snapshots": "tsx apps/sync/src/cli/snapshots.ts",
+    "import:meta": "tsx apps/sync/src/cli/import-meta.ts",
+    "sync:signals": "tsx apps/sync/src/cli/signals.ts"
   },
   "devDependencies": {
     "tsx": "^4.20.0"

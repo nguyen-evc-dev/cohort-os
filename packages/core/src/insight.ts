@@ -68,7 +68,7 @@ export function buildInsightPayload(input: {
       ...(crm ? { crm_leads: c.crm.leads, seats: c.crm.seats, cpa_seat: nn(c.crm.cpaSeat) } : { cost_per_result: nn(c.cpaReal), results: c.conversions }),
     })),
     campaigns: r.tree.slice(0, 8).map((c) => ({
-      campaign: c.name, sac: !!c.isSac, ...metaOf(c), steps: stepsOf(c), ...(crm ? { crm_leads: c.crm.leads, seats: c.crm.seats, cpa_seat: nn(c.crm.cpaSeat), cash_roas: nn(c.crm.cashRoas) } : {}),
+      campaign_id: c.id, campaign: c.name, sac: !!c.isSac, ...metaOf(c), steps: stepsOf(c), ...(crm ? { crm_leads: c.crm.leads, seats: c.crm.seats, cpa_seat: nn(c.crm.cpaSeat), cash_roas: nn(c.crm.cashRoas) } : {}),
     })),
     signals: (input.signals ?? []).slice(0, 12).map((s) => {
       const n = s.numbers || {};

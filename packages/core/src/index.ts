@@ -14,4 +14,7 @@ export * from './hubspot-import';
 export * from './crm-payload';
 export * from './share';
 export * from './insight';
+export * from './snapshot';
+export * from './table';
+export * from './meta-report';
 export * from './skills.generated';

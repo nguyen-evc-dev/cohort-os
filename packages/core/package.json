@@ -10,8 +10,11 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "devDependencies": {
+    "@types/node": "^22.18.0",
     "typescript": "^5.9.3",
-    "vitest": "^3.2.4",
-    "@types/node": "^22.18.0"
+    "vitest": "^3.2.4"
+  },
+  "dependencies": {
+    "fflate": "^0.8.3"
   }
 }

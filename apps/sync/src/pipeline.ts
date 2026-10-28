@@ -3,13 +3,14 @@
  * Mọi kiểm tra chạy TRƯỚC khi ghi: dữ liệu bị từ chối thì DB không đổi (chỉ thêm 1 dòng sync_runs).
  */
 import {
-  addDays, dateRange, importAdRowToDaily, importEntitiesToRows, isSacCampaign, latestBudgetFromImport,
-  mergeWithDefaultConfig, parseActivityDatetime, parseAdName, parseConfigRows, round2, syncWindow, validateImport,
+  addDays, adRowsToDaily, dateRange, importEntitiesToRows, isSacCampaign, latestBudgetFromImport,
+  mergeWithDefaultConfig, OPTIONAL_DAILY_COLS, parseActivityDatetime, parseConfigRows, round2, syncWindow, validateImport,
   type Config, type Row,
 } from '@cohort/core';
 import type { Batch } from './inbox';
 import { isMissingSchema, type Store } from './store';
 import { recomputeSignals } from './signals-job';
+import { refreshSnapshots } from './snapshots-job';
 
 export interface PushOptions { now?: Date; accountId?: string; tz?: string }
 export interface PushResult {
@@ -17,18 +18,12 @@ export interface PushResult {
   runId: string;
   targetDate: string;
   problems: unknown[];
-  rows: { ads_daily: number; entities: number; creatives: number; budget_events: number; signals: number; actions: number; custom_conversions: number };
+  rows: { ads_daily: number; entities: number; creatives: number; budget_events: number; signals: number; actions: number; custom_conversions: number; snapshots: number };
   warnings: string[];
   spendByDate: Record<string, number>;
   note?: string;
 }
 
-const INT_COLS = ['impressions', 'reach', 'link_clicks', 'landing_page_views', 'leads_meta', 'purchases_meta', 'thruplay'];
-/** Cột thêm theo từng migration — DB chưa có thì bỏ dần từ mới nhất (sync không chết vì quên db push). */
-const OPTIONAL_COLS: { migration: string; cols: string[] }[] = [
-  { migration: 'video_retention', cols: ['video_p25', 'video_p50', 'video_p75', 'video_p100'] },
-  { migration: 'conversion_goals', cols: ['video_3s', 'outbound_clicks'] },
-];
 const blankToNull = (v: unknown) => (v === '' || v === undefined ? null : v);
 
 /** Các kiểm tra chặn ghi. Trả danh sách lỗi (rỗng = hợp lệ). */
@@ -60,21 +55,7 @@ export function checkBatch(batch: Batch, config: Config, accountId?: string): un
 }
 
 export function toDailyRows(batch: Batch, accountId: string, nowIso: string, ptToday: string): Row[] {
-  return batch.adRows.map((r) => {
-    const d = importAdRowToDaily(r, accountId, nowIso);
-    d.video_3s = Math.round(Number(r.video_3s) || 0);
-    d.outbound_clicks = Math.round(Number(r.outbound_clicks) || 0);
-    for (const c of OPTIONAL_COLS[0].cols) d[c] = Math.round(Number(r[c]) || 0);
-    for (const c of INT_COLS) d[c] = Math.round(Number(d[c]) || 0);
-    const parsed = parseAdName(r.ad_name);
-    return {
-      ...d,
-      funnel_stage: d.funnel_stage || null,
-      creative_format: d.creative_format || null,
-      concept_key: parsed.conceptKey,
-      provisional: d.date >= ptToday,
-    };
-  });
+  return adRowsToDaily(batch.adRows, accountId, nowIso, ptToday);
 }
 
 export function toEntityRows(batch: Batch, accountId: string, prev: Row[], tz: string, nowIso: string): Row[] {
@@ -137,7 +118,7 @@ export async function pushBatch(store: Store, batch: Batch, opts: PushOptions = 
   const ptToday = addDays(syncWindow(now, tz).targetDate, 1);
   const spendByDate: Record<string, number> = {};
   for (const c of batch.checkRows) spendByDate[c.date] = round2(c.account_spend) as number;
-  const rows = { ads_daily: 0, entities: 0, creatives: 0, budget_events: 0, signals: 0, actions: 0, custom_conversions: 0 };
+  const rows = { ads_daily: 0, entities: 0, creatives: 0, budget_events: 0, signals: 0, actions: 0, custom_conversions: 0, snapshots: 0 };
   const warnings: string[] = [];
 
   const runId = await store.startRun(batch.meta.mode === 'backfill' ? 'meta_backfill' : 'meta', targetDate);
@@ -161,9 +142,9 @@ export async function pushBatch(store: Store, batch: Batch, opts: PushOptions = 
     for (let i = 0, drop: string[] = []; ; i++) {
       try { await store.upsert('meta_ads_daily', drop.length ? daily.map((r) => Object.fromEntries(Object.entries(r).filter(([k]) => !drop.includes(k)))) : daily, 'date,ad_id'); break; }
       catch (e) {
-        if (!isMissingSchema(e) || i >= OPTIONAL_COLS.length) throw e;
+        if (!isMissingSchema(e) || i >= OPTIONAL_DAILY_COLS.length) throw e;
         // DB chưa có cột của migration mới → bỏ các cột đó, ghi phần còn lại
-        const m = OPTIONAL_COLS[i];
+        const m = OPTIONAL_DAILY_COLS[i];
         drop = [...drop, ...m.cols];
         if (m.migration === 'conversion_goals') missingGoals = true;
         warnings.push(`DB chưa có migration ${m.migration}: bỏ qua ${m.cols.join(', ')}${m.migration === 'conversion_goals' ? ', chuyển đổi custom' : ''}. Chạy npx supabase db push --linked`);
@@ -188,6 +169,14 @@ export async function pushBatch(store: Store, batch: Batch, opts: PushOptions = 
     // Backfill từng khúc: chỉ tính tín hiệu cho ngày cuối của khúc
     const signals = await recomputeSignals(store, targetDate, config, nowIso);
     rows.signals = signals.length;
+
+    // Bản chụp báo cáo cho Bé Sugar: lỗi ở đây không làm hỏng lần sync (số Meta đã ghi xong)
+    try { rows.snapshots = (await refreshSnapshots(store, nowIso)).rows; }
+    catch (e) {
+      warnings.push(isMissingSchema(e)
+        ? 'DB chưa có bảng bot_snapshots: Bé Sugar chưa đọc được báo cáo. Chạy npx supabase db push --linked'
+        : `Không làm mới được bản chụp cho Bé Sugar: ${String((e as Error).message).slice(0, 200)}`);
+    }
 
     await store.finishRun(runId, { status: 'ok', rows: daily.length, date_from: batch.meta.date_from, date_to: batch.meta.date_to,
       note: `entities=${entities.length} creatives=${creatives.length} budget_events=${events.length} actions=${rows.actions} signals=${signals.length}${warnings.length ? ` · ⚠ ${warnings.join(' | ')}` : ''}`.slice(0, 1000) });

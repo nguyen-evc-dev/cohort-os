@@ -2,7 +2,9 @@
 
 - Prompt: [meta-sync.md](meta-sync.md). Scheduled task `cohort-meta-sync-1405` và `cohort-meta-sync-1505` chỉ trỏ tới file này.
 - Luồng: `npm run sync:gate` → (RUN) 5 tool đọc Meta → JSON vào `sync/inbox/<ngày>/` → `npm run sync:push -- sync/inbox/<ngày>`.
-- Backfill lần đầu: mở Claude Code trong thư mục `cohort-os`, gõ: *"Chạy agent/meta-sync.md với BACKFILL_DAYS=45"*.
+- Task backfill 45 ngày đã bỏ (28/10/2026, quá tốn token). Cần lấy lịch sử thì xuất CSV từ Ads Manager rồi upload thủ công trên web.
+- **Quy định: mọi task lặp lại hằng ngày chạy model Haiku.** Model không nằm trong SKILL.md và công cụ lịch không đặt được: vào Claude Desktop → Schedule → mở task → Edit → Model → Haiku.
+- Hiện 2 task sync (14:05, 15:05) đang tạm dừng. Hướng nạp số mới: upload CSV report thủ công, sau đó Bé Sugar tự vào Ads Manager xuất report mỗi ngày bằng browser (chỉ xem / xuất report, không sửa gì).
 
 ## Quyền chạy tự động (T1.3) — Nguyên tự dán 1 lần
 

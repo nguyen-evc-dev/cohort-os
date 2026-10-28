@@ -2,6 +2,7 @@
 import { revalidatePath } from 'next/cache';
 import { validateCrmPayload, type CrmPayload } from '@cohort/core';
 import { requireAdmin } from '@/lib/supabase/server';
+import { refreshBotSnapshots } from '@/lib/snapshots';
 
 export type ImportResult =
   | { ok: true; slug: string; projectName: string; submissions: number; deals: number; campaignsAdded: number; importId: string }
@@ -71,6 +72,9 @@ export async function importCrm(raw: unknown): Promise<ImportResult> {
     const { error } = await supabase.from('crm_deals').upsert(dealRows.slice(i, i + CHUNK), { onConflict: 'deal_id' });
     if (error) return { ok: false, error: `Ghi deal thất bại (${error.message}). Import chưa hoàn tất, có thể chạy lại an toàn.` };
   }
+
+  // Bé Sugar đọc bản chụp đã tính sẵn: làm mới ngay để /report thấy số CRM vừa import (lỗi ở đây không làm hỏng import)
+  await refreshBotSnapshots(supabase);
 
   revalidatePath('/', 'layout');
   return { ok: true, slug: project.slug, projectName: project.name, submissions: subRows.length, deals: dealRows.length, campaignsAdded: added, importId: imp.id };

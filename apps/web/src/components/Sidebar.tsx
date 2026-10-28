@@ -9,6 +9,7 @@ const NAV: { key: string; icon: string; label: string; href: (slug: string, q: s
   { key: 'ryg', icon: '◉', label: 'Đèn RYG', href: (s, q) => `/p/${s}/ryg${q}`, match: (p, s) => p === `/p/${s}/ryg`, project: true },
 ];
 const TOOLS = [
+  { href: '/import-meta', icon: '⇧', label: 'Upload report Meta' },
   { href: '/import', icon: '⇪', label: 'Import HubSpot' },
   { href: '/projects', icon: '⚑', label: 'Project & campaign' },
   { href: '/settings', icon: '⚙', label: 'Cài đặt & sync log' },

@@ -9,7 +9,7 @@ export interface SyncRunPatch { status: 'ok' | 'rejected' | 'error'; rows?: numb
 
 export interface Store {
   lastMetaSyncedDate(): Promise<string | null>;
-  startRun(kind: 'meta' | 'meta_backfill', targetDate: string): Promise<string>;
+  startRun(kind: 'meta' | 'meta_backfill' | 'meta_upload', targetDate: string): Promise<string>;
   finishRun(id: string, patch: SyncRunPatch): Promise<void>;
   select(table: string, opts?: { gte?: [string, string]; in?: [string, string[]] }): Promise<Row[]>;
   upsert(table: string, rows: Row[], onConflict: string): Promise<void>;
@@ -17,6 +17,10 @@ export interface Store {
   replaceSignals(asOf: string, rows: Row[]): Promise<void>;
   /** Xóa chuyển đổi trong [from, to] rồi ghi lại (chuyển đổi có thể giảm khi Meta điều chỉnh attribution). */
   replaceActions(from: string, to: string, rows: Row[]): Promise<void>;
+  /** Thay chuyển đổi custom của các campaign × loại hành động trong [from, to] (upload report chỉ đụng phần của mình). */
+  replaceActionsScoped(scope: { campaignIds: string[]; actionTypes: string[]; from: string; to: string }, rows: Row[]): Promise<void>;
+  /** Ghi bản chụp báo cáo cho bot (khóa slug + range_key) và xóa bản của Project không còn. */
+  replaceSnapshots(rows: Row[]): Promise<void>;
 }
 
 /** Lỗi do DB chưa có bảng / cột mới (migration chưa đẩy). */
@@ -43,7 +47,7 @@ export class SupabaseStore implements Store {
     return data?.[0]?.target_date ?? null;
   }
 
-  async startRun(kind: 'meta' | 'meta_backfill', targetDate: string) {
+  async startRun(kind: 'meta' | 'meta_backfill' | 'meta_upload', targetDate: string) {
     const { data, error } = await this.db.from('sync_runs')
       .insert({ kind, target_date: targetDate, status: 'running' }).select('id').single();
     if (error) throw new Error(`sync_runs: ${error.message}`);
@@ -82,6 +86,27 @@ export class SupabaseStore implements Store {
       const { error: e2 } = await this.db.from('meta_actions_daily').insert(rows.slice(i, i + CHUNK));
       if (e2) throw new Error(`meta_actions_daily: ${e2.message}`);
     }
+  }
+
+  async replaceActionsScoped(scope: { campaignIds: string[]; actionTypes: string[]; from: string; to: string }, rows: Row[]) {
+    const { error } = await this.db.from('meta_actions_daily').delete().in('campaign_id', scope.campaignIds).in('action_type', scope.actionTypes).gte('date', scope.from).lte('date', scope.to);
+    if (error) throw new Error(`meta_actions_daily: ${error.message}`);
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      const { error: e2 } = await this.db.from('meta_actions_daily').insert(rows.slice(i, i + CHUNK));
+      if (e2) throw new Error(`meta_actions_daily: ${e2.message}`);
+    }
+  }
+
+  async replaceSnapshots(rows: Row[]) {
+    const keep = new Set(rows.map((r) => `${r.slug}|${r.range_key}`));
+    const { data, error } = await this.db.from('bot_snapshots').select('slug,range_key');
+    if (error) throw new Error(`bot_snapshots: ${error.message}`);
+    for (const old of data || []) {
+      if (keep.has(`${old.slug}|${old.range_key}`)) continue;
+      const { error: e1 } = await this.db.from('bot_snapshots').delete().eq('slug', old.slug).eq('range_key', old.range_key);
+      if (e1) throw new Error(`bot_snapshots: ${e1.message}`);
+    }
+    await this.upsert('bot_snapshots', rows, 'slug,range_key');
   }
 
   async replaceSignals(asOf: string, rows: Row[]) {
@@ -130,6 +155,12 @@ export class MemoryStore implements Store {
   }
   async replaceActions(from: string, to: string, rows: Row[]) {
     this.tables.meta_actions_daily = this.t('meta_actions_daily').filter((r) => r.date < from || r.date > to).concat(rows.map((r) => ({ ...r })));
+  }
+  async replaceActionsScoped(scope: { campaignIds: string[]; actionTypes: string[]; from: string; to: string }, rows: Row[]) {
+    this.tables.meta_actions_daily = this.t('meta_actions_daily').filter((r) => !(scope.campaignIds.includes(String(r.campaign_id)) && scope.actionTypes.includes(String(r.action_type)) && r.date >= scope.from && r.date <= scope.to)).concat(rows.map((r) => ({ ...r })));
+  }
+  async replaceSnapshots(rows: Row[]) {
+    this.tables.bot_snapshots = rows.map((r) => ({ ...r }));
   }
   async replaceSignals(asOf: string, rows: Row[]) {
     this.tables.signals = this.t('signals').filter((r) => r.as_of !== asOf).concat(rows.map((r) => ({ ...r })));

@@ -68,7 +68,15 @@ beforeAll(async () => {
     insert into public.meta_ads_daily (date, ad_id, account_id, campaign_id, campaign_name, objective, adset_id, ad_name, creative_concept, concept_key, creative_format, spend, purchases_meta) values
       ('2026-10-20', '${AD_MOF}', '763840845228631', '${CAMP}', 'COACH-WBN-RE-PC-SAC', 'OUTCOME_SALES', '120252703228760233', 'Video ban doc_WARM_MOF', 'Video ban doc', 'video ban doc', 'video', 60.00, 2),
       ('2026-10-20', '${AD_KV}',  '763840845228631', '${CAMP}', 'COACH-WBN-RE-PC-SAC', 'OUTCOME_SALES', '120252743565210233', 'Photo Poster KV_WARM', 'Photo Poster KV', 'photo poster kv', 'photo', 40.00, 1);
-    insert into public.meta_entities (level, id, name, campaign_id, is_sac) values ('campaign', '${CAMP}', 'COACH-WBN-RE-PC-SAC', '${CAMP}', true);
+    insert into public.meta_entities (level, id, name, campaign_id, adset_id, objective, effective_status, is_sac, targeting_summary) values
+      ('campaign', '${CAMP}', 'COACH-WBN-RE-PC-SAC', '${CAMP}', '', 'OUTCOME_SALES', 'ACTIVE', true, null),
+      ('adset', '120252703228760233', 'MOF', '${CAMP}', '', null, 'ACTIVE', false, '{"age_min":25,"age_max":45,"genders":[],"countries":["US"]}'),
+      ('ad', '${AD_MOF}', 'Video ban doc_WARM_MOF', '${CAMP}', '120252703228760233', null, 'ACTIVE', false, null);
+    insert into public.meta_creatives (ad_id, title, body, link_url, cta) values
+      ('${AD_MOF}', 'Webinar bất động sản', 'Học cách đầu tư nhà cho thuê', 'https://evancoaching.net/webinar', 'SIGN_UP');
+    insert into public.bot_snapshots (slug, range_key, project_id, as_of, data_version, payload) values
+      ('webinar-re11', '7d', '${projectId}', '2026-10-20', 'abc123def4567890', '{"project":"Webinar RE11","primary":{"label":"Purchased","count":3}}'),
+      ('all', '7d', null, '2026-10-20', 'abc123def4567891', '{"project":"Toàn tài khoản"}');
     insert into public.crm_submissions (conversion_id, project_id, contact_id, converted_on, ad_id, campaign_id, placement, source_hint) values
       ('c-1', '${projectId}', '257000000001', '2026-10-20', '${AD_MOF}', '${CAMP}', 'Facebook_Mobile_Reels', 'tracked'),
       ('c-2', '${projectId}', '257000000002', '2026-10-20', '${AD_KV}',  '${CAMP}', 'Facebook_Mobile_Feed', 'tracked'),
@@ -141,9 +149,11 @@ describe('admin', () => {
     await as('authenticated', `insert into public.creative_assets (scope, concept_key, drive_file_id) values ('concept', 'video ban doc', '1AbCdEfGhIjKlMnOp')`, ADMIN);
     expect(await as('authenticated', 'select count(*)::int as n from public.creative_assets', ADMIN)).toEqual([{ n: 1 }]);
   });
-  it('KHÔNG ghi được bảng Meta (chỉ sync được ghi)', async () => {
-    await denied(as('authenticated', `update public.meta_ads_daily set spend = 0`, ADMIN));
+  it('Bảng Meta: admin chỉ được ghi đúng phần upload report (xem mô tả bên dưới); không xóa số Meta, không ghi tín hiệu', async () => {
+    await denied(as('authenticated', `delete from public.meta_ads_daily`, ADMIN));
     await denied(as('authenticated', `delete from public.signals`, ADMIN));
+    await denied(as('authenticated', `update public.signals set color = 'green'`, ADMIN));
+    await denied(as('authenticated', `update public.meta_creatives set title = 'x'`, ADMIN));
   });
 });
 
@@ -189,6 +199,36 @@ describe('bot_reader (Bé Sugar)', () => {
       select table_name || '.' || column_name as col from information_schema.columns
       where table_schema = 'bot' and table_name not like '\\_%' and column_name ~ '(contact|deal_id|conversion)'`);
     expect(r.rows).toEqual([]);
+  });
+});
+
+describe('Phase 4 — bản chụp báo cáo & view cho bot', () => {
+  const call = (view: string) => as<{ r: any }>('anon', `select public.bot_read('${BOT_TOKEN}', '${view}', null) as r`).then((x) => x[0].r);
+  it('v_project_snapshot: payload theo Project, "all" không có project_id', async () => {
+    const rows = await call('v_project_snapshot');
+    expect(rows.map((r: any) => [r.slug, r.name, r.range_key])).toEqual([['all', 'Toàn tài khoản', '7d'], ['webinar-re11', 'Webinar RE11', '7d']]);
+    expect(rows[1].payload.primary).toEqual({ label: 'Purchased', count: 3 });
+  });
+  it('v_campaigns: trạng thái, cờ SAC, Project chứa campaign, chi tiêu 7/30 ngày', async () => {
+    const [c] = await call('v_campaigns');
+    expect(c).toMatchObject({ campaign_id: CAMP, effective_status: 'ACTIVE', is_sac: true, project_slug: 'webinar-re11', objective: 'OUTCOME_SALES' });
+    expect([Number(c.spend_7d), Number(c.spend_30d), Number(c.spend_latest)]).toEqual([100, 100, 100]);
+  });
+  it('v_ad_creatives: copy + link + targeting của adset + cờ SAC của campaign', async () => {
+    const rows = await call('v_ad_creatives');
+    const ad = rows.find((r: any) => r.ad_id === AD_MOF);
+    expect(ad).toMatchObject({ is_sac: true, campaign_name: 'COACH-WBN-RE-PC-SAC', adset_name: 'MOF', title: 'Webinar bất động sản', link_url: 'https://evancoaching.net/webinar' });
+    expect(ad.targeting_summary).toMatchObject({ age_min: 25, age_max: 45 });
+  });
+  it('bot_reader / anon KHÔNG đọc được bảng gốc; chỉ admin ghi được bản chụp', async () => {
+    await denied(as('bot_reader', 'select * from public.bot_snapshots'));
+    await denied(as('bot_reader', 'select * from public.meta_creatives'));
+    await denied(as('anon', 'select * from public.bot_snapshots'));
+    const w = `insert into public.bot_snapshots (slug, range_key, as_of, data_version, payload) values ('x-test', '30d', '2026-10-20', 'abc123def4567892', '{}')`;
+    await denied(as('authenticated', w, STRANGER));
+    await as('authenticated', w, ADMIN);
+    const bad = `insert into public.bot_snapshots (slug, range_key, as_of, data_version, payload) values ('x-test', '90d', '2026-10-20', 'abc123def4567892', '{}')`;
+    await expect(as('authenticated', bad, ADMIN)).rejects.toThrow(/violates check constraint/);
   });
 });
 
@@ -313,5 +353,36 @@ describe('creative_assets.stage (gắn stage thủ công)', () => {
   });
   it('anon vẫn không đọc được creative_assets (stage không lộ)', async () => {
     await denied(as('anon', 'select stage from public.creative_assets'));
+  });
+});
+
+describe('Upload report Meta — admin ghi được đúng các bảng cần, không hơn', () => {
+  const AD_NEW = '120252999999999991';
+  const ins = (d: string, spend = 12.5) => `insert into public.meta_ads_daily (date, ad_id, account_id, campaign_id, adset_id, spend) values ('${d}', '${AD_NEW}', '763840845228631', '${CAMP}', '120252703228760233', ${spend})
+    on conflict (date, ad_id) do update set spend = excluded.spend`;
+  it('admin upsert meta_ads_daily (ghi mới rồi ghi đè); người lạ và anon bị từ chối', async () => {
+    await as('authenticated', ins('2026-10-22'), ADMIN);
+    await as('authenticated', ins('2026-10-22', 20), ADMIN);
+    const [r] = await as<any>('authenticated', `select spend from public.meta_ads_daily where ad_id = '${AD_NEW}'`, ADMIN);
+    expect(Number(r.spend)).toBe(20);
+    await denied(as('authenticated', ins('2026-10-23'), STRANGER));
+    await denied(as('anon', ins('2026-10-23')));
+  });
+  it('admin không xóa được số Meta, không ghi được tín hiệu; chuyển đổi chỉ admin ghi / xóa', async () => {
+    await denied(as('authenticated', `delete from public.meta_ads_daily where ad_id = '${AD_NEW}'`, ADMIN));
+    await denied(as('authenticated', `insert into public.signals (as_of, level, entity_id, type, color, action, numbers) values ('2026-10-22', 'ad', '${AD_NEW}', 'burn', 'red', 'pause_ad', '{}')`, ADMIN));
+    const act = `insert into public.meta_actions_daily (date, ad_id, campaign_id, action_type, count) values ('2026-10-22', '${AD_NEW}', '${CAMP}', 'offsite_conversion.custom.2050096562303283', 4)`;
+    await denied(as('authenticated', act, STRANGER));
+    await as('authenticated', act, ADMIN);
+    await as('authenticated', `delete from public.meta_actions_daily where ad_id = '${AD_NEW}'`, ADMIN);
+    const [left] = await as<any>('authenticated', `select count(*)::int as n from public.meta_actions_daily where ad_id = '${AD_NEW}'`, ADMIN);
+    expect(left.n).toBe(0);
+  });
+  it('admin chỉ INSERT entity (không sửa dòng sync đã ghi) và ghi nhận lần upload (kind meta_upload)', async () => {
+    await as('authenticated', `insert into public.meta_entities (level, id, name, campaign_id, adset_id, is_sac) values ('campaign', '120252999999999992', 'NEW-SAC', '120252999999999992', '', true)`, ADMIN);
+    await denied(as('authenticated', `update public.meta_entities set name = 'hack' where id = '${CAMP}'`, ADMIN));
+    await as('authenticated', `insert into public.sync_runs (kind, target_date, status, rows) values ('meta_upload', '2026-10-22', 'ok', 1)`, ADMIN);
+    await denied(as('authenticated', `insert into public.sync_runs (kind, status) values ('meta_upload', 'ok')`, STRANGER));
+    await expect(as('authenticated', `insert into public.sync_runs (kind, status) values ('khac', 'ok')`, ADMIN)).rejects.toThrow(/violates check constraint/);
   });
 });
