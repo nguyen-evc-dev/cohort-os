@@ -8,6 +8,7 @@ import { filterQuery, parseFilters, showCrm } from '@/lib/filters';
 import { fmtInt, fmtMoney, fmtRange, fmtRate } from '@/lib/format';
 import { Banner, PageHead } from '@/components/ui';
 import { AssetDialog } from './AssetDialog';
+import { shotKey } from '@/lib/drive';
 import { CreativeGrid } from '@/components/CreativeGrid';
 import { ExportPngButton, ShareButton } from '@/components/ShareExport';
 
@@ -25,7 +26,7 @@ export default async function CreativeVault({ params, searchParams }: { params: 
   const loaded = await loadReport(db, ws, slug, f);
   if (!loaded) notFound();
   const { project, report: r } = loaded;
-  const { rows: assets, stageReady } = await loadAssets(db);
+  const { rows: assets, stageReady, shotReady } = await loadAssets(db);
   const assetOf = (c: ConceptRow) => assets.find((x) => (x.scope === 'concept' && x.concept_key === c.conceptKey) || (x.scope === 'ad' && c.ads.includes(String(x.ad_id))));
   const adNames = new Map<string, string>();
   const walk = (ns: typeof r.tree) => ns.forEach((n) => { if (n.level === 'ad') adNames.set(n.id, n.name); walk(n.children); });
@@ -71,14 +72,16 @@ export default async function CreativeVault({ params, searchParams }: { params: 
         <div className="panel empty"><h3>Không có creative nào</h3><p>Bỏ bớt bộ lọc hoặc chọn khoảng ngày dài hơn.</p></div>
       ) : (
         <CreativeGrid concepts={list} crmMode={crmMode} primaryLabel={r.primary.label} steps={r.steps}
-          thumbs={Object.fromEntries(list.flatMap((c) => { const a = assetOf(c); return a?.drive_file_id ? [[c.conceptKey, a.drive_file_id as string]] : []; }))}
+          thumbs={Object.fromEntries(list.flatMap((c) => { const a = assetOf(c); const key = a?.shot_code ? shotKey(a.shot_code as string) : (a?.drive_file_id as string | undefined); return key ? [[c.conceptKey, key]] : []; }))}
           extra={(c) => {
             const asset = assetOf(c);
             return (
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                 <AssetDialog conceptKey={c.conceptKey} conceptName={c.concept} ads={c.ads.map((id) => ({ id, name: adNames.get(id) ?? id }))}
-                  existing={asset ? { id: asset.id, scope: asset.scope, fileId: asset.drive_file_id, postUrl: asset.post_url } : null}
+                  existing={asset ? { id: asset.id, scope: asset.scope, fileId: asset.drive_file_id, postUrl: asset.post_url, shotCode: (asset.shot_code as string | null | undefined) ?? null } : null} shotReady={shotReady}
                   stage={(asset?.stage as string | null | undefined) ?? null} currentStages={c.stages} stageReady={stageReady} />
+                {asset?.drive_url && asset?.shot_code && <a className="cap" href={asset.drive_url} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'underline', marginTop: 4 }}>Mở video Drive ↗</a>}
+                {asset?.shot_url && <a className="cap" href={asset.shot_url} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'underline', marginTop: 4 }}>Ảnh gốc ↗</a>}
                 {asset?.post_url && <a className="cap" href={asset.post_url} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'underline', marginTop: 4 }}>Xem post ↗</a>}
               </div>
             );

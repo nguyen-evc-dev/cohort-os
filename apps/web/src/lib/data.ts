@@ -110,10 +110,12 @@ export async function loadSignals(db: SupabaseClient): Promise<{ asOf: string | 
  * creative_assets (kèm cột stage). Nếu migration creative_stage chưa được đẩy lên DB thì cột stage chưa có:
  * đọc lại không có stage để trang vẫn chạy (stage thủ công sẽ chưa có tác dụng).
  */
-export async function loadAssets(db: SupabaseClient): Promise<{ rows: Row[]; stageReady: boolean }> {
+export async function loadAssets(db: SupabaseClient): Promise<{ rows: Row[]; stageReady: boolean; shotReady: boolean }> {
   const sel = (cols: string) => fetchAll((a, b) => db.from('creative_assets').select(cols).order('id').range(a, b));
-  try { return { rows: await sel('id,scope,concept_key,ad_id,drive_file_id,post_url,stage'), stageReady: true }; }
-  catch { return { rows: await sel('id,scope,concept_key,ad_id,drive_file_id,post_url'), stageReady: false }; }
+  const base = 'id,scope,concept_key,ad_id,drive_file_id,drive_url,post_url';
+  try { return { rows: await sel(`${base},stage,shot_code,shot_url`), stageReady: true, shotReady: true }; } catch { /* chưa có cột ảnh chụp */ }
+  try { return { rows: await sel(`${base},stage`), stageReady: true, shotReady: false }; } catch { /* chưa có cột stage */ }
+  return { rows: await sel(base), stageReady: false, shotReady: false };
 }
 
 export function stageOverridesFrom(assets: Row[]): { byConcept: Record<string, string>; byAd: Record<string, string> } {

@@ -14,7 +14,7 @@ describe('decideAccess', () => {
   });
 
   it('route công khai: không cần đăng nhập', () => {
-    for (const p of ['/login', '/auth/callback', '/s/abc123', '/api/thumb/1AbCdEf']) {
+    for (const p of ['/login', '/auth/callback', '/s/abc123', '/api/thumb/1AbCdEf', '/api/shot/F3q-UtARTvHl']) {
       expect(decideAccess(p, anon)).toEqual({ action: 'allow' });
     }
   });

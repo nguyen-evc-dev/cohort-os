@@ -386,3 +386,28 @@ describe('Upload report Meta — admin ghi được đúng các bảng cần, kh
     await expect(as('authenticated', `insert into public.sync_runs (kind, status) values ('khac', 'ok')`, ADMIN)).rejects.toThrow(/violates check constraint/);
   });
 });
+
+describe('Creative Vault — ảnh chụp prnt.sc', () => {
+  const ins = (extra: string, vals: string) => `insert into public.creative_assets (scope, concept_key, ${extra}) values ('concept', 'shot test', ${vals})`;
+  it('lưu được ảnh chụp (host CDN Lightshot); anon gọi shot_image_for lấy được link; mã lạ trả null', async () => {
+    await as('authenticated', ins('shot_code, shot_url, shot_image', `'F3q-UtARTvHl', 'https://prnt.sc/F3q-UtARTvHl', 'https://img.lightshot.app/gCtlGoIkT5iUSVGvKcAOlA.png'`), ADMIN);
+    const [ok] = await as<any>('anon', `select public.shot_image_for('F3q-UtARTvHl') as u`);
+    expect(ok.u).toBe('https://img.lightshot.app/gCtlGoIkT5iUSVGvKcAOlA.png');
+    const [none] = await as<any>('anon', `select public.shot_image_for('khongco123') as u`);
+    expect(none.u).toBeNull();
+    const [bad] = await as<any>('anon', `select public.shot_image_for('a; drop table x') as u`);
+    expect(bad.u).toBeNull();
+  });
+  it('CHECK chặn host ảnh lạ, link http, mã và ảnh không đi đôi', async () => {
+    const run = (cols: string, vals: string, key: string) => as('authenticated', `insert into public.creative_assets (scope, concept_key, ${cols}) values ('concept', '${key}', ${vals})`, ADMIN);
+    await expect(run('shot_code, shot_image', `'abcd1234', 'https://evil.com/a.png'`, 'k1')).rejects.toThrow(/violates check constraint/);
+    await expect(run('shot_code, shot_image', `'abcd1234', 'http://img.lightshot.app/a.png'`, 'k2')).rejects.toThrow(/violates check constraint/);
+    await expect(run('shot_code, shot_image', `'abcd1234', 'https://img.lightshot.app/a.png?x=http://169.254.169.254'`, 'k3')).rejects.toThrow(/violates check constraint/);
+    await expect(run('shot_code', `'abcd1234'`, 'k4')).rejects.toThrow(/violates check constraint/);
+    await expect(run('shot_code, shot_image', `'a b', 'https://img.lightshot.app/a.png'`, 'k5')).rejects.toThrow(/violates check constraint/);
+  });
+  it('người lạ không ghi được; anon không đọc được bảng, chỉ gọi hàm', async () => {
+    await denied(as('authenticated', ins('shot_code, shot_image', `'zzzz9999', 'https://img.lightshot.app/b.png'`), STRANGER));
+    await denied(as('anon', 'select * from public.creative_assets'));
+  });
+});

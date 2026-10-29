@@ -1,13 +1,14 @@
 import type { ReactNode } from 'react';
 import type { ConceptRow, StepSummary } from '@cohort/core';
 import { fmtInt, fmtMoney, fmtRate } from '@/lib/format';
+import { thumbSrc } from '@/lib/drive';
 
 const STATUS = { green: 'Winner', red: 'Burner', yellow: 'Theo dõi', grey: 'Chưa đủ data' } as const;
 
 /** Lưới thẻ creative theo concept (Design Proposal 4.2). Dùng chung cho Creative Vault và trang share. */
 export function CreativeGrid({ concepts, thumbs, crmMode, extra, primaryLabel, steps }: {
   concepts: ConceptRow[];
-  /** conceptKey → fileId Drive (ảnh phục vụ qua /api/thumb) */
+  /** conceptKey → khóa ảnh bìa: fileId Drive (/api/thumb) hoặc "s~<mã>" ảnh chụp prnt.sc (/api/shot) */
   thumbs: Record<string, string>;
   crmMode: boolean;
   /** Tên bước chính của mục tiêu (vd "Purchased (mua vé)") */
@@ -24,7 +25,7 @@ export function CreativeGrid({ concepts, thumbs, crmMode, extra, primaryLabel, s
         return (
           <article key={c.conceptKey} className={`cv ${c.light}`}>
             <div className="thumb">
-              {fileId ? <img src={`/api/thumb/${fileId}`} alt={`Creative ${c.concept}`} loading="lazy" crossOrigin="anonymous" /> : <span aria-hidden>{c.format === 'video' ? '▶' : '▣'}</span>}
+              {fileId ? <img src={thumbSrc(fileId)} alt={`Creative ${c.concept}`} loading="lazy" crossOrigin="anonymous" /> : <span aria-hidden>{c.format === 'video' ? '▶' : '▣'}</span>}
               <div className="pills">
                 <span className="pill">● {c.format || '?'}</span>
                 {c.stages.map((s) => <span key={s} className="pill">{s.replace('FU', '')}</span>)}

@@ -1,4 +1,5 @@
 'use server';
+import { shotKey } from '@/lib/drive';
 import crypto from 'node:crypto';
 import { headers } from 'next/headers';
 import { revalidatePath } from 'next/cache';
@@ -24,11 +25,12 @@ export async function createShare(input: Input): Promise<ShareResult> {
   const loaded = await loadReport(supabase, ws, String(input.slug), f);
   if (!loaded) return { ok: false, error: 'Không tìm thấy Project.' };
 
-  const assets = await fetchAll((a, b) => supabase.from('creative_assets').select('scope,concept_key,ad_id,drive_file_id').not('drive_file_id', 'is', null).order('id').range(a, b));
+  const assets = await fetchAll((a, b) => supabase.from('creative_assets').select('scope,concept_key,ad_id,drive_file_id,shot_code').order('id').range(a, b)).catch(() => fetchAll((a, b) => supabase.from('creative_assets').select('scope,concept_key,ad_id,drive_file_id').not('drive_file_id', 'is', null).order('id').range(a, b)));
   const thumbs: Record<string, string> = {};
   for (const c of loaded.report.concepts) {
     const hit = assets.find((x) => (x.scope === 'concept' && x.concept_key === c.conceptKey) || (x.scope === 'ad' && c.ads.includes(String(x.ad_id))));
-    if (hit?.drive_file_id) thumbs[c.conceptKey] = hit.drive_file_id;
+    const key = hit?.shot_code ? shotKey(hit.shot_code as string) : (hit?.drive_file_id as string | null | undefined);
+    if (key) thumbs[c.conceptKey] = key;
   }
 
   let snapshot;

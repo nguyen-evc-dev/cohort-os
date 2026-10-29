@@ -3,8 +3,8 @@
  * Chỉ 1 admin dùng app. Mọi route đều cần đăng nhập + là admin, trừ danh sách công khai.
  */
 
-/** Route không cần đăng nhập. `/s/` = share link snapshot, `/api/thumb/` = ảnh creative qua proxy. */
-export const PUBLIC_PREFIXES = ['/login', '/auth/callback', '/s/', '/api/thumb/'] as const;
+/** Route không cần đăng nhập. `/s/` = share link snapshot, `/api/thumb/` và `/api/shot/` = ảnh creative (Drive / prnt.sc) qua proxy. */
+export const PUBLIC_PREFIXES = ['/login', '/auth/callback', '/s/', '/api/thumb/', '/api/shot/'] as const;
 /** Route cho người đã đăng nhập nhưng KHÔNG phải admin (để thấy thông báo và đăng xuất). */
 export const NON_ADMIN_ALLOWED = ['/forbidden', '/auth/signout'] as const;
 

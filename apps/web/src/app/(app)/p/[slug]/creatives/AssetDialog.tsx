@@ -1,39 +1,53 @@
 'use client';
 import { useActionState, useEffect, useRef, useState } from 'react';
 import { parseAssetLink } from '@/lib/drive';
-import { removeAsset, saveAsset, type AssetState } from './actions';
+import { previewShot, removeAsset, removeShot, saveAsset, type AssetState } from './actions';
 
 interface Props {
   conceptKey: string;
   conceptName: string;
   ads: { id: string; name: string }[];
-  existing: { id: string; scope: string; fileId: string | null; postUrl: string | null } | null;
+  existing: { id: string; scope: string; fileId: string | null; postUrl: string | null; shotCode: string | null } | null;
   /** Stage đã gắn tay (TOFU/MOFU/BOFU) hoặc null = tự nhận theo tên ad */
   stage: string | null;
   /** Stage hiện đang hiển thị cho concept này (đã gồm nhãn tay nếu có) */
   currentStages: string[];
   /** false khi migration creative_stage chưa được đẩy lên DB */
   stageReady: boolean;
+  /** false khi migration creative_shot chưa được đẩy lên DB */
+  shotReady: boolean;
 }
 
 const label = (s: string) => s.replace('FU', '');
 
 /** Hộp thoại gắn ảnh (link Drive / bài đăng) và stage thủ công cho 1 concept hoặc 1 ad. */
-export function AssetDialog({ conceptKey, conceptName, ads, existing, stage, currentStages, stageReady }: Props) {
+export function AssetDialog({ conceptKey, conceptName, ads, existing, stage, currentStages, stageReady, shotReady }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const [link, setLink] = useState('');
   const [scope, setScope] = useState<'concept' | 'ad'>('concept');
   const [stageVal, setStageVal] = useState(stage ?? 'AUTO');
   const [broken, setBroken] = useState(false);
+  const [shot, setShot] = useState<{ state: 'idle' | 'loading' | 'ok' | 'error'; imageUrl?: string; message?: string }>({ state: 'idle' });
   const [state, action, pending] = useActionState<AssetState, FormData>(saveAsset, { ok: false, message: '' });
   const parsed = link ? parseAssetLink(link) : null;
   const stageChanged = stageVal !== (stage ?? 'AUTO');
 
   useEffect(() => { if (state.ok) { ref.current?.close(); setLink(''); } }, [state]);
   useEffect(() => { setBroken(false); }, [link]);
+  // Xem thử ảnh prnt.sc: server đọc trang prnt.sc để lấy link ảnh (đợi 500ms sau khi dừng gõ)
+  useEffect(() => {
+    if (parsed?.kind !== 'shot') { setShot({ state: 'idle' }); return; }
+    let alive = true;
+    setShot({ state: 'loading' });
+    const t = setTimeout(async () => {
+      const r = await previewShot(link);
+      if (alive) setShot(r.ok ? { state: 'ok', imageUrl: r.imageUrl } : { state: 'error', message: r.message });
+    }, 500);
+    return () => { alive = false; clearTimeout(t); };
+  }, [link]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setStageVal(stage ?? 'AUTO'); }, [stage]);
 
-  const canSave = !pending && parsed?.kind !== 'error' && (!!link || stageChanged);
+  const canSave = !pending && parsed?.kind !== 'error' && (!!link || stageChanged) && !(parsed?.kind === 'shot' && (shot.state === 'error' || !shotReady));
 
   return (
     <>
@@ -43,11 +57,14 @@ export function AssetDialog({ conceptKey, conceptName, ads, existing, stage, cur
       <dialog ref={ref} aria-label={`Gắn ảnh và stage cho ${conceptName}`} style={{ background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--border-strong)', borderRadius: 8, padding: 20, width: 'min(480px, 92vw)' }}>
         <form action={action}>
           <h3 style={{ margin: '0 0 4px', fontSize: 18 }}>Gắn ảnh cho “{conceptName}”</h3>
-          <p className="note" style={{ margin: '0 0 12px' }}>Dán link file Drive (chia sẻ “Bất kỳ ai có đường liên kết”) hoặc link bài đăng Facebook / Instagram. Để trống nếu chỉ muốn gắn stage.</p>
+          <p className="note" style={{ margin: '0 0 12px' }}><b>Video / file gốc:</b> dán link Drive (chia sẻ “Bất kỳ ai có đường liên kết”). <b>Ảnh bìa:</b> dán link ảnh chụp màn hình prnt.sc, ảnh này được ưu tiên hiện trên thẻ còn video vẫn giữ link Drive. Mỗi lần dán 1 link; để trống nếu chỉ muốn gắn stage.</p>
           <input type="hidden" name="concept_key" value={conceptKey} />
           <input type="hidden" name="stage_edit" value={stageChanged ? '1' : '0'} />
           <label htmlFor={`l-${conceptKey}`}>Link</label>
-          <input id={`l-${conceptKey}`} name="link" value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://drive.google.com/file/d/…/view" autoComplete="off" />
+          <input id={`l-${conceptKey}`} name="link" value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://drive.google.com/file/d/…/view hoặc https://prnt.sc/…" autoComplete="off" />
+          {existing && (existing.fileId || existing.shotCode) && (
+            <p className="note" style={{ margin: '6px 0 0', fontSize: 12 }}>Đang gắn: {existing.fileId ? <b>Drive ✓</b> : 'chưa có Drive'} · {existing.shotCode ? <b>ảnh chụp prnt.sc ✓ (đang làm ảnh bìa)</b> : 'chưa có ảnh chụp'}</p>
+          )}
           {parsed?.kind === 'error' && <p className="err" style={{ margin: '8px 0 0', fontSize: 13 }}>{parsed.message}</p>}
           {parsed?.kind === 'drive' && (
             <div style={{ marginTop: 10 }}>
@@ -55,6 +72,17 @@ export function AssetDialog({ conceptKey, conceptName, ads, existing, stage, cur
                 ? <p className="err" style={{ fontSize: 13, margin: 0 }}>Không tải được ảnh. Mở file trong Drive → Chia sẻ → “Bất kỳ ai có đường liên kết” (người xem), rồi dán lại.</p>
                 // eslint-disable-next-line @next/next/no-img-element
                 : <img src={`/api/thumb/${parsed.fileId}`} alt="Xem thử" onError={() => setBroken(true)} style={{ maxHeight: 180, maxWidth: '100%', borderRadius: 6, border: '1px solid var(--border)' }} />}
+            </div>
+          )}
+          {parsed?.kind === 'shot' && (
+            <div style={{ marginTop: 10 }}>
+              {!shotReady && <p className="err" style={{ fontSize: 13, margin: 0 }}>DB chưa có cột ảnh chụp. Chạy <span className="mono">npx supabase db push --linked</span> rồi thử lại.</p>}
+              {shot.state === 'loading' && <p className="note" style={{ margin: 0 }}>Đang đọc ảnh từ prnt.sc…</p>}
+              {shot.state === 'error' && <p className="err" style={{ fontSize: 13, margin: 0 }}>{shot.message}</p>}
+              {shot.state === 'ok' && shot.imageUrl
+                // eslint-disable-next-line @next/next/no-img-element
+                ? <img src={shot.imageUrl} alt="Xem thử ảnh chụp" referrerPolicy="no-referrer" style={{ maxHeight: 180, maxWidth: '100%', borderRadius: 6, border: '1px solid var(--border)' }} />
+                : null}
             </div>
           )}
           {parsed?.kind === 'post' && <p className="note" style={{ margin: '8px 0 0' }}>Link bài đăng sẽ hiện nút “Xem post”. Facebook không cho lấy ảnh tự động nên thẻ vẫn dùng ảnh mặc định.</p>}
@@ -89,6 +117,12 @@ export function AssetDialog({ conceptKey, conceptName, ads, existing, stage, cur
             <button type="button" className="ghost" style={{ margin: 0 }} onClick={() => ref.current?.close()}>Đóng</button>
           </div>
         </form>
+        {existing?.shotCode && (
+          <form action={removeShot} style={{ marginTop: 10 }}>
+            <input type="hidden" name="id" value={existing.id} />
+            <button type="submit" className="ghost" style={{ margin: 0, width: 'auto', padding: '4px 10px', fontSize: 12 }}>Gỡ riêng ảnh chụp prnt.sc (giữ Drive và stage)</button>
+          </form>
+        )}
         {existing && (
           <form action={removeAsset} style={{ marginTop: 10 }}>
             <input type="hidden" name="id" value={existing.id} />
