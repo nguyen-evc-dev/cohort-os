@@ -34,8 +34,13 @@ function selfCheck() {
   ScriptApp.getProjectTriggers().forEach(function (t) { var h = t.getHandlerFunction(); counts[h] = (counts[h] || 0) + 1; });
   var total = Object.keys(counts).reduce(function (s, k) { return s + counts[k]; }, 0);
   lines.push('ℹ️ Trigger: ' + total + '/20 (' + (Object.keys(counts).map(function (k) { return k + ' ' + counts[k]; }).join(', ') || 'không có') + ')');
-  if ((counts.processJobs || 0) > 2) bad('Có ' + counts.processJobs + ' trigger processJobs tích tụ (giới hạn 20 làm lệnh lỗi "too many triggers"). Chạy hàm cleanupTriggers.');
-  if (!counts.tick) lines.push('⚠️ Chưa có trigger tick (nhắc việc sau sync). Chạy hàm installTriggers nếu muốn nhận tin tự động.');
+  if ((counts.processJobs || 0) > 1) bad('Có ' + counts.processJobs + ' trigger processJobs (chỉ cần 1, bản cũ tạo mỗi lệnh 1 cái). Chạy hàm installTriggers để dọn và cài lại đúng.');
+  if (!counts.processJobs) bad('Chưa có trigger processJobs mỗi phút: lệnh chậm (/ryg, /analyze, /audit) sẽ không được xử lý. Chạy hàm installTriggers một lần.');
+  if (!counts.tick) lines.push('⚠️ Chưa có trigger tick (nhắc việc sau sync). Chạy hàm installTriggers.');
+  var hb = Number(PropertiesService.getScriptProperties().getProperty('PROCESSOR_HEARTBEAT') || 0);
+  if (!hb) bad('Bộ xử lý nền chưa từng chạy (chưa có nhịp tim). Chạy installTriggers rồi đợi 1 phút.');
+  else if (Date.now() - hb > HEARTBEAT_MAX_AGE_MS_) bad('Bộ xử lý nền đã ngừng ' + Math.round((Date.now() - hb) / 60000) + ' phút. Kiểm tra trigger processJobs (installTriggers).');
+  else lines.push('✅ Bộ xử lý nền còn sống (nhịp tim ' + Math.round((Date.now() - hb) / 1000) + ' giây trước).');
 
   var props = PropertiesService.getScriptProperties();
   REQUIRED_PROPERTIES_.forEach(function (k) { if (!props.getProperty(k)) bad('Thiếu Script Property ' + k + '.'); });
@@ -72,8 +77,7 @@ function testChat() {
   try {
     reply = onAppCommand(event);
     Logger.log('Trả lời ngay: ' + JSON.stringify(reply));
-    processJobs({});
-    Logger.log('Đã chạy việc xong. Xem kết quả trong space (agent Sugar Analyst hoặc Alerts).');
+    Logger.log('Đã chạy xong (/report chạy ngay). Xem kết quả trong space (agent Sugar Analyst hoặc Alerts).');
   } catch (e) {
     Logger.log('LỖI: ' + (e && e.stack ? e.stack : e));
     throw e;
@@ -81,11 +85,13 @@ function testChat() {
   return reply;
 }
 
-/** Xóa mọi trigger xử lý lệnh tích tụ (giữ trigger tick nhắc việc). Chạy 1 lần khi gặp lỗi "too many triggers". */
+/** Xóa mọi trigger processJobs (kể cả bản cũ tạo theo từng lệnh). Sau đó chạy installTriggers để cài lại đúng 1 cái. */
 function cleanupTriggers() {
-  var n = purgeJobTriggers_();
-  var left = ScriptApp.getProjectTriggers().length;
-  var out = 'Đã xóa ' + n + ' trigger processJobs. Còn lại ' + left + '/20 trigger.';
+  var n = 0;
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'processJobs') { try { ScriptApp.deleteTrigger(t); n += 1; } catch (e) { /* đã xóa */ } }
+  });
+  var out = 'Đã xóa ' + n + ' trigger processJobs. Còn lại ' + ScriptApp.getProjectTriggers().length + '/20 trigger. Chạy installTriggers để cài lại.';
   Logger.log(out);
   return out;
 }

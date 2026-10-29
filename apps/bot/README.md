@@ -21,7 +21,7 @@ File trong `src/` là code Apps Script, đưa lên project **CohortOS-Engine**, 
 ## Sau khi đưa code lên
 1. Điền Script Properties như trên.
 2. Chạy `testConnection` một lần (đọc Supabase + gửi tin thử vào Alerts). Lần đầu Google sẽ xin thêm quyền (gọi dịch vụ bên ngoài, tạo trigger): bấm cho phép.
-3. Chạy `installTriggers` một lần (trigger `tick` 10 phút cho nhắc việc). Trigger xử lý lệnh (`processJobs`) tự được hẹn 1 lần cho mỗi lệnh, không cần cài.
+3. Chạy `installTriggers` một lần: cài **2 trigger cố định**, `tick` mỗi 10 phút (nhắc việc sau sync) và `processJobs` mỗi 1 phút (xử lý lệnh chậm `/ryg`, `/analyze`, `/audit`). Chạy lại nhiều lần không nhân đôi. Bot **không tạo trigger theo từng lệnh** (Apps Script giới hạn 20 trigger).
 4. **Deploy → Manage deployments → Edit → Version: New version → Deploy**, giữ nguyên Deployment ID của Chat App.
 5. Trong space **Bot Growth Command** gõ `/` phải thấy 6 lệnh. Thử `/report`.
 
@@ -29,8 +29,8 @@ File trong `src/` là code Apps Script, đưa lên project **CohortOS-Engine**, 
 
 | Lệnh | Agent trả lời | Việc |
 |---|---|---|
-| `/campaigns` | 🔎 Sugar Analyst | Campaign đang chạy: trạng thái, SAC, chi tiêu 7 ngày, Project |
-| `/report [project\|campaign] [7d\|30d\|all]` | 🔎 Sugar Analyst | Card theo **mục tiêu của Project**: chuyển đổi chính + CPA/CPL so target, chuỗi bước, Truth Gap, creative, đèn, link sâu về web. Không tốn token |
+| `/campaigns` | 🔎 Sugar Analyst | Campaign đang chạy: trạng thái, SAC, chi tiêu 7 ngày, Project. **Chạy ngay** (vài giây) |
+| `/report [project\|campaign] [7d\|30d\|all]` | 🔎 Sugar Analyst | Card theo **mục tiêu của Project**: chuyển đổi chính + CPA/CPL so target, chuỗi bước, Truth Gap, creative, đèn, link sâu về web. Không tốn token. **Chạy ngay** |
 | `/ryg [project]` | 🚦 Sugar RYG | Card đèn đỏ / xanh / vàng (màu do code quyết định) + lời giải thích của Claude (skill `ryg-decision`) |
 | `/analyze <câu hỏi>` | 🔎 Sugar Analyst | Claude phân tích sâu (skill `ads-deep-analysis` + `meta-ads-playbook`). Mọi số phải có trong dữ liệu, sai thì viết lại 1 lần, vẫn sai thì gắn cảnh báo |
 | `/audit <campaign\|ad\|ID>` | 🛡️ Sugar Auditor | Card 🔴🟡🟢 do **code** tính (targeting SAC, cụm hứa hẹn thu nhập…) + Claude đọc copy và landing page (`web_fetch` chỉ `evancoaching.net` / `evancoaching.com`) |
@@ -51,12 +51,12 @@ Gõ câu tự do khi @Bé Sugar: bot tự chọn lệnh theo từ khóa (không 
 3. Chọn hàm **`testChat`** → ▶ Run. Lần đầu Google hiện hộp xin quyền mới (gọi dịch vụ bên ngoài, tạo trigger): **Review permissions → Allow**. Chạy xong, space nhận card báo cáo. Nếu lỗi, log hiện dòng gây lỗi.
 4. **Deploy phải là "Manage deployments → ✏️ Edit → Version: New version → Deploy" trên deployment CŨ.** Tạo "New deployment" sẽ ra Deployment ID khác, còn Chat App vẫn trỏ ID cũ nên chạy code cũ.
 5. Thấy tin hồng "Chỉ hiển thị với bạn" trong Chat: bấm vào đọc. Nếu là "Authorization required / Configuration required" thì làm bước 3. Từ bản này, lỗi bất ngờ trong code hiện thành tin "⚠️ Bé Sugar gặp lỗi khi nhận lệnh (…)" ngay trong Chat.
-6. Lỗi "too many time-based triggers" (giới hạn 20 trigger của Apps Script): chạy hàm **`cleanupTriggers`** một lần (xóa trigger xử lý lệnh tích tụ, giữ trigger `tick`). Từ bản này mỗi lần chỉ giữ đúng 1 trigger xử lý.
+6. Lỗi "too many time-based triggers": là của bản cũ tạo mỗi lệnh 1 trigger. Bản mới không còn tạo. Chạy `cleanupTriggers` rồi `installTriggers` để dọn và cài lại đúng 2 trigger. `selfCheck` hiện số trigger và nhịp tim của bộ xử lý nền.
 7. Xem chi tiết ở **Executions** (Thực thi) của Apps Script: mỗi lệnh gõ trong Chat là 1 dòng `onAppCommand`.
 
 ## Giới hạn đã biết
 - `/audit` kèm landing page có thể mất 30–60 giây. Nếu quá thời gian chờ, bot vẫn gửi card 🔴🟡🟢 và báo phần đọc landing page chưa làm được; gõ lại với 1 ad cụ thể.
-- Việc xếp hàng chờ quá 10 phút thì bị bỏ (anh đã gõ lại).
+- Lệnh chậm (`/ryg`, `/analyze`, `/audit`) trả lời trong khoảng 1–2 phút (trigger chạy mỗi phút). Việc xếp hàng chờ quá 10 phút thì bị bỏ (anh đã gõ lại).
 
 | File | Việc |
 |---|---|
@@ -70,7 +70,7 @@ Gõ câu tự do khi @Bé Sugar: bot tự chọn lệnh theo từ khóa (không 
 | `Reports.js` | Dựng card `/campaigns`, `/report`, `/ryg` |
 | `Claude.js` | Gọi Claude, quét PII, kiểm tra số có căn cứ, log |
 | `Commands.js` | Thực thi từng lệnh (kể cả `/audit` với `web_fetch`) |
-| `Jobs.js` | Hàng đợi + trigger 1 lần: trả lời ngay "Em đang xem nha…" rồi gửi kết quả vào đúng thread |
+| `Jobs.js` | Lệnh nhanh chạy ngay; lệnh chậm xếp hàng (Script Properties), trigger cố định mỗi phút xử lý, "nhịp tim" để Chat biết bộ xử lý còn sống |
 | `Chat.js` | `onMessage`, `onAppCommand`, `onAddedToSpace` (lỗi bất ngờ hiện thành tin báo lỗi trong Chat) |
 | `Diag.js` | `selfCheck` (kiểm tra đủ file / cấu hình), `testChat` (giả lập `/report webinar` từ admin) |
 

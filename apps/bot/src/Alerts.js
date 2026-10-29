@@ -35,13 +35,16 @@ function tick() {
   }
 }
 
-/** Chạy tay 1 lần trong editor: cài trigger 10 phút (xóa trigger tick cũ nếu có). */
+/** Chạy tay 1 lần trong editor: cài trigger tick (10 phút) và processJobs (1 phút), xóa bản cũ. */
 function installTriggers() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
-    if (t.getHandlerFunction() === 'tick') ScriptApp.deleteTrigger(t);
+    var h = t.getHandlerFunction();
+    if (h === 'tick' || h === 'processJobs') ScriptApp.deleteTrigger(t); // cả trigger processJobs 1 lần của bản cũ
   });
   ScriptApp.newTrigger('tick').timeBased().everyMinutes(10).create();
-  Logger.log('Đã cài trigger tick mỗi 10 phút.');
+  ScriptApp.newTrigger('processJobs').timeBased().everyMinutes(1).create();
+  Logger.log('Đã cài 2 trigger: tick mỗi 10 phút (nhắc việc sau sync) và processJobs mỗi 1 phút (xử lý lệnh chậm của Chat).');
+  processJobs(); // ghi nhịp tim ngay để Chat biết bộ xử lý đã sống
 }
 
 /** Chạy tay để kiểm tra kết nối: đọc Supabase + gửi 1 tin thử vào Bé Sugar Alerts. */

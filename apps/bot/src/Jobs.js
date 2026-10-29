@@ -1,11 +1,19 @@
 /**
- * T4.1 — Hàng đợi việc. Chat yêu cầu trả lời đồng bộ dưới ~30 giây, nên onMessage / onAppCommand chỉ: kiểm tra quyền,
- * xếp việc vào Script Properties (JOB_<id>) và hẹn trigger 1 lần sau 1 giây. Trigger chạy processJobs: làm việc thật
- * (đọc Supabase, gọi Claude) rồi gửi kết quả vào ĐÚNG THREAD của lệnh qua webhook của agent.
+ * T4.1 — Hàng đợi việc, KHÔNG tạo trigger theo từng lệnh.
+ * Bài học: trigger hẹn giờ tạo trong lúc Chat gọi bot gắn với "tài liệu" của add-on, không tự mất sau khi chạy và code không dọn được
+ * → đầy giới hạn 20 → lỗi "too many time-based triggers". Nên:
+ *   • Lệnh nhanh, không cần Claude (/campaigns, /report) chạy NGAY trong lúc nhận lệnh (vài giây, dưới giới hạn 30 giây của Chat)
+ *   • Lệnh chậm (/ryg có giải thích, /analyze, /audit) chỉ XẾP VIỆC vào Script Properties (JOB_<id>); MỘT trigger cố định chạy mỗi phút
+ *     (installTriggers tạo 1 lần từ trình soạn thảo) lấy việc ra làm rồi gửi kết quả vào đúng thread qua webhook của agent.
+ *   • processJobs ghi "nhịp tim" mỗi phút: nếu không thấy nhịp tim thì bot báo ngay là chưa cài trigger, không xếp việc vào hư không.
  */
 
 var JOB_PREFIX_ = 'JOB_';
 var JOB_MAX_AGE_MS_ = 10 * 60 * 1000;
+var HEARTBEAT_KEY_ = 'PROCESSOR_HEARTBEAT';
+var HEARTBEAT_MAX_AGE_MS_ = 5 * 60 * 1000;
+/** Lệnh chạy ngay (không gọi Claude) */
+var INLINE_CMDS_ = ['campaigns', 'report'];
 
 /** Id việc từ tên tin nhắn Chat (Chat có thể gửi lại cùng 1 sự kiện → không chạy 2 lần). */
 function jobId_(info) {
@@ -13,54 +21,31 @@ function jobId_(info) {
   return base.replace(/[^A-Za-z0-9]+/g, '_').slice(-70);
 }
 
-/**
- * Apps Script cho tối đa 20 trigger / người dùng / dự án, và trigger hẹn giờ 1 lần KHÔNG tự biến mất sau khi chạy.
- * Nên mỗi lần hẹn đều dọn hết trigger processJobs cũ trước: việc nằm trong Script Properties, trigger nào chạy cũng xử lý hết,
- * vì vậy luôn chỉ cần đúng 1 trigger đang chờ.
- */
-function purgeJobTriggers_() {
-  var n = 0;
-  ScriptApp.getProjectTriggers().forEach(function (t) {
-    if (t.getHandlerFunction() === 'processJobs') { try { ScriptApp.deleteTrigger(t); n += 1; } catch (e) { /* đã bị xóa */ } }
-  });
-  return n;
+/** Nhận việc về mình: true = chưa ai làm (và đánh dấu đã nhận); false = đã làm / đang làm (Chat gửi lại sự kiện). */
+function claimJob_(id) {
+  var cache = CacheService.getScriptCache();
+  if (cache.get('DONE_' + id)) return false;
+  cache.put('DONE_' + id, '1', 21600);
+  return true;
 }
 
-function scheduleProcess_() {
-  purgeJobTriggers_();
-  ScriptApp.newTrigger('processJobs').timeBased().after(1000).create();
+/** Bộ xử lý nền (trigger mỗi phút) còn sống không? */
+function processorAlive_() {
+  var t = Number(PropertiesService.getScriptProperties().getProperty(HEARTBEAT_KEY_) || 0);
+  return t > 0 && Date.now() - t < HEARTBEAT_MAX_AGE_MS_;
 }
 
-function hasPendingJobs_() {
-  var all = PropertiesService.getScriptProperties().getProperties();
-  return Object.keys(all).some(function (k) { return k.indexOf(JOB_PREFIX_) === 0; });
-}
-
-/** true = đã xếp việc; false = việc này đã có / đã chạy (bỏ qua). Ném lỗi nếu không hẹn được trigger. */
+/** true = đã xếp việc; false = việc này đã có / đã chạy (bỏ qua). */
 function enqueueJob_(job) {
   var props = PropertiesService.getScriptProperties();
   var key = JOB_PREFIX_ + job.id;
   if (props.getProperty(key) !== null) return false;
   if (CacheService.getScriptCache().get('DONE_' + job.id)) return false;
   props.setProperty(key, JSON.stringify({ cmd: job.cmd, arg: String(job.arg || '').slice(0, 300), thread: job.thread || null, at: Date.now() }));
-  try {
-    scheduleProcess_();
-  } catch (e) {
-    props.deleteProperty(key);
-    throw e;
-  }
   return true;
 }
 
-/** Xóa trigger 1 lần vừa chạy xong (Apps Script giới hạn 20 trigger / dự án). */
-function dropFiredTrigger_(e) {
-  if (!e || !e.triggerUid) return;
-  ScriptApp.getProjectTriggers().forEach(function (t) {
-    if (t.getUniqueId() === e.triggerUid) { try { ScriptApp.deleteTrigger(t); } catch (x) { /* đã bị xóa */ } }
-  });
-}
-
-/** Chạy 1 việc: trả kết quả vào thread của lệnh; lỗi thì báo lỗi dễ hiểu vào cùng thread. */
+/** Chạy 1 việc: trả kết quả vào thread của lệnh; lỗi thì báo lỗi dễ hiểu vào cùng thread. Trả số tin gửi được. */
 function runJob_(job) {
   var agent = AGENT_FOR[job.cmd] || 'alerts';
   var messages;
@@ -70,23 +55,21 @@ function runJob_(job) {
     console.error('job ' + job.cmd + ' lỗi: ' + String(e && e.message).slice(0, 300));
     messages = [{ text: '⚠️ Em chưa làm xong lệnh /' + job.cmd + ': ' + friendlyError_(e) + '.' }];
   }
+  var sent = 0;
   messages.forEach(function (m) {
-    try { postToChat_(agent, m, job.thread); }
+    try { postToChat_(agent, m, job.thread); sent += 1; }
     catch (e) { console.error('gửi webhook ' + agent + ' lỗi: ' + String(e && e.message).slice(0, 300)); }
   });
+  return sent;
 }
 
-/** Trigger entry point (installable one-time trigger). */
+/** Trigger cố định mỗi phút. Có `e` (sự kiện trigger) hay không đều chạy được. */
 function processJobs(e) {
+  var props = PropertiesService.getScriptProperties();
+  props.setProperty(HEARTBEAT_KEY_, String(Date.now())); // nhịp tim: để Chat biết bộ xử lý còn sống
   var lock = LockService.getScriptLock();
-  if (!lock.tryLock(10000)) {
-    // Đang bận (việc khác đang chạy): hẹn lại để việc đã xếp không bị bỏ quên
-    try { if (hasPendingJobs_()) scheduleProcess_(); } catch (e) { console.error('hẹn lại lỗi: ' + String(e && e.message).slice(0, 200)); }
-    return;
-  }
+  if (!lock.tryLock(10000)) return; // đang bận việc khác; phút sau trigger chạy lại, việc vẫn nằm trong hàng đợi
   try {
-    dropFiredTrigger_(e);
-    var props = PropertiesService.getScriptProperties();
     var all = props.getProperties();
     Object.keys(all).filter(function (k) { return k.indexOf(JOB_PREFIX_) === 0; }).sort().forEach(function (k) {
       var job = null;
@@ -99,6 +82,4 @@ function processJobs(e) {
   } finally {
     lock.releaseLock();
   }
-  // Có lệnh mới xếp hàng trong lúc đang chạy (trigger của nó đã bị dọn) → hẹn lại 1 lần
-  try { if (hasPendingJobs_()) scheduleProcess_(); } catch (e) { console.error('hẹn lại lỗi: ' + String(e && e.message).slice(0, 200)); }
 }

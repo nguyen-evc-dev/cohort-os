@@ -62,9 +62,13 @@ const creatives = [
 const DB = { v_project_snapshot: snapshots, v_campaigns: campaigns, v_signals_latest: rawSignals, v_ad_creatives: creatives };
 
 const say = (text: string) => ({ content: [{ type: 'text', text }], stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 5 } });
-function bot(extra: Partial<GasOpts> = {}) { return loadGas({ now: NOW, db: DB, ...extra, props: { AGENT_WEBHOOKS: JSON.stringify(WEBHOOKS), ...(extra.props || {}) } }); }
+function bot(extra: Partial<GasOpts> & { noProcessor?: boolean } = {}) {
+  const g = loadGas({ now: NOW, db: DB, ...extra, props: { AGENT_WEBHOOKS: JSON.stringify(WEBHOOKS), ...(extra.props || {}) } });
+  if (!extra.noProcessor) g.sb.processJobs(); // trigger mỗi phút đã chạy → có nhịp tim
+  return g;
+}
 type G = ReturnType<typeof bot>;
-const drain = (g: G) => { g.sb.processJobs({ triggerUid: g.triggers[0]?.id }); };
+const drain = (g: G) => { g.sb.processJobs({}); };
 const run = (g: G, ev: unknown, isCmd = true) => { const r = isCmd ? g.sb.onAppCommand(ev) : g.sb.onMessage(ev); drain(g); return r; };
 const textOf = (m: any): string => JSON.stringify(m);
 
@@ -82,20 +86,48 @@ describe('T4.1 — quyền truy cập & định tuyến', () => {
   it('admin nhưng ở space lạ → từ chối; trong space của webhook Alerts hoặc DM → được', () => {
     const g = bot();
     expect(ackText(g.sb.onAppCommand(cmdEvent(2, '', { space: 'spaces/ZZZ' })))).toMatch(/chỉ làm việc trong space Bot Growth Command/);
-    expect(ackText(g.sb.onAppCommand(cmdEvent(2, '', { space: SPACE })))).toMatch(/Em đang xem/);
+    expect(ackText(g.sb.onAppCommand(cmdEvent(2, '', { space: SPACE })))).toMatch(/Em gửi ở trên/);
     expect(ackText(g.sb.onAppCommand(cmdEvent(3, '', { space: 'spaces/DM1', spaceType: 'DIRECT_MESSAGE', name: 'spaces/DM1/messages/x' })))).toMatch(/đèn/);
   });
   it('ALLOWED_SPACES cho thêm space', () => {
     const g = bot({ props: { ALLOWED_SPACES: 'spaces/ZZZ, spaces/YYY' } });
-    expect(ackText(g.sb.onAppCommand(cmdEvent(2, '', { space: 'spaces/YYY' })))).toMatch(/Em đang xem/);
+    expect(ackText(g.sb.onAppCommand(cmdEvent(2, '', { space: 'spaces/YYY' })))).toMatch(/Em gửi ở trên/);
   });
-  it('trả lời đồng bộ ngay (ack) và hẹn trigger 1 lần sau 1 giây; chưa gọi mạng', () => {
+  it('lệnh nhanh (/report, /campaigns) chạy NGAY, gửi vào thread rồi báo "gửi ở trên"; không tạo trigger', () => {
     const g = bot();
     const r = g.sb.onAppCommand(cmdEvent(2, 'webinar'));
-    expect(ackText(r)).toBe('🔎 Em đang xem nha…');
-    expect(g.triggers).toEqual([{ id: 'trg-1', handler: 'processJobs', afterMs: 1000 }]);
+    expect(ackText(r)).toBe('✅ Em gửi ở trên rồi nha 👆');
+    expect(g.posted.map((p) => p.agent)).toEqual(['analyst']);
+    expect(g.triggers).toEqual([]);
+  });
+  it('lệnh chậm (/ryg, /analyze, /audit): trả lời ngay + xếp việc; chỉ làm khi trigger mỗi phút chạy', () => {
+    const g = bot();
+    expect(ackText(g.sb.onAppCommand(cmdEvent(3, '')))).toMatch(/Em xem đèn đỏ-vàng-xanh nha, kết quả về trong khoảng 1 phút/);
     expect(g.reads).toEqual([]);
     expect(g.posted).toEqual([]);
+    expect(Object.keys(g.props).filter((k) => k.startsWith('JOB_'))).toHaveLength(1);
+    expect(g.triggers).toEqual([]); // Chat không bao giờ tạo trigger
+    drain(g);
+    expect(g.posted.map((p) => p.agent)).toEqual(['ryg']);
+    expect(Object.keys(g.props).filter((k) => k.startsWith('JOB_'))).toHaveLength(0);
+  });
+  it('bộ xử lý nền chưa chạy (chưa cài trigger) → lệnh chậm báo ngay, không xếp việc vào hư không; lệnh nhanh vẫn chạy', () => {
+    const g = bot({ noProcessor: true });
+    expect(ackText(g.sb.onAppCommand(cmdEvent(4, 'webinar')))).toMatch(/Bộ xử lý nền của em chưa chạy.*installTriggers/);
+    expect(Object.keys(g.props).filter((k) => k.startsWith('JOB_'))).toHaveLength(0);
+    expect(ackText(g.sb.onAppCommand(cmdEvent(2, 'webinar', { name: 'spaces/AAA/messages/ok1' })))).toMatch(/Em gửi ở trên/);
+  });
+  it('nhịp tim quá 5 phút → coi như đã dừng; trigger chạy lại thì sống lại', () => {
+    const g = bot();
+    g.setNow('2026-10-22T08:06:00Z');
+    expect(ackText(g.sb.onAppCommand(cmdEvent(3, '')))).toMatch(/chưa chạy/);
+    g.sb.processJobs();
+    expect(ackText(g.sb.onAppCommand(cmdEvent(3, '', { name: 'spaces/AAA/messages/again' })))).toMatch(/Em xem đèn/);
+  });
+  it('webhook lỗi → lệnh nhanh báo thật, không nói dối "đã gửi"', () => {
+    const g = bot();
+    g.sb.UrlFetchApp.fetch = ((orig) => (url: string, o: any) => (url.includes('chat.googleapis.com') ? { getResponseCode: () => 500, getContentText: () => 'down' } : orig(url, o)))(g.sb.UrlFetchApp.fetch);
+    expect(ackText(g.sb.onAppCommand(cmdEvent(2, 'webinar')))).toMatch(/chưa gửi được kết quả/);
   });
   it('/help trả lời ngay, không xếp việc', () => {
     const g = bot();
@@ -128,16 +160,9 @@ describe('T4.1 — quyền truy cập & định tuyến', () => {
     expect(ackText(g.sb.onAppCommand(cmdEvent(2, '', { space: 'spaces/DM1', spaceType: 'DIRECT_MESSAGE' })))).toMatch(/chưa có webhook/);
     expect(g.triggers).toEqual([]);
   });
-  it('trigger 1 lần được dọn sau khi chạy', () => {
-    const g = bot();
-    g.sb.onAppCommand(cmdEvent(2, 'webinar'));
-    expect(g.triggers).toHaveLength(1);
-    drain(g);
-    expect(g.triggers).toEqual([]);
-  });
   it('việc quá 10 phút bị bỏ (người dùng đã gõ lại)', () => {
     const g = bot();
-    g.sb.onAppCommand(cmdEvent(2, 'webinar'));
+    g.sb.onAppCommand(cmdEvent(3, ''));
     g.setNow('2026-10-22T08:20:00Z');
     drain(g);
     expect(g.posted).toEqual([]);
@@ -415,8 +440,10 @@ describe('chẩn đoán khi bot im lặng', () => {
   });
   it('selfCheck: đủ file + cấu hình → ✅ và đọc được bản chụp', () => {
     const g = bot();
+    g.sb.installTriggers();
     const out = g.sb.selfCheck();
     expect(out).toMatch(/✅ Đủ \d+ hàm cần thiết/);
+    expect(out).toMatch(/✅ Bộ xử lý nền còn sống/);
     expect(out).toMatch(/✅ CohortCore có 4 skill/);
     expect(out).toMatch(/✅ Đọc được 6 bản chụp báo cáo/);
     expect(out).toMatch(/Mọi thứ ổn/);
@@ -438,52 +465,46 @@ describe('chẩn đoán khi bot im lặng', () => {
   it('testChat: chạy trọn đường đi /report webinar và gửi card vào space', () => {
     const g = bot();
     const reply = g.sb.testChat();
-    expect(ackText(reply)).toBe('🔎 Em đang xem nha…');
+    expect(ackText(reply)).toBe('✅ Em gửi ở trên rồi nha 👆');
     expect(g.posted).toHaveLength(1);
     expect(g.posted[0].body.cardsV2[0].card.header.title).toBe('🔎 Webinar RE11');
   });
 });
 
-describe('giới hạn 20 trigger của Apps Script', () => {
-  it('30 lệnh liên tiếp (chưa xử lý) → luôn chỉ còn đúng 1 trigger processJobs, không tích tụ', () => {
+describe('không tạo trigger theo từng lệnh (giới hạn 20 trigger của Apps Script)', () => {
+  it('50 lệnh liên tiếp (nhanh + chậm) → Chat KHÔNG tạo trigger nào', () => {
     const g = bot();
-    for (let i = 0; i < 30; i++) g.sb.onAppCommand(cmdEvent(2, 'webinar', { name: `spaces/AAA/messages/q${i}` }));
-    expect(g.triggers.filter((t) => t.handler === 'processJobs')).toHaveLength(1);
+    for (let i = 0; i < 25; i++) g.sb.onAppCommand(cmdEvent(2, 'webinar', { name: `spaces/AAA/messages/q${i}` }));
+    for (let i = 0; i < 25; i++) g.sb.onAppCommand(cmdEvent(3, '', { name: `spaces/AAA/messages/r${i}` }));
+    expect(g.triggers).toEqual([]);
     drain(g);
-    expect(g.posted).toHaveLength(30); // 1 trigger xử lý hết mọi việc đã xếp
+    expect(g.posted).toHaveLength(50);
   });
-  it('trigger tick nhắc việc KHÔNG bị dọn nhầm', () => {
-    const g = bot();
+  it('installTriggers: đúng 2 trigger cố định (tick 10 phút, processJobs 1 phút), xóa trigger processJobs 1 lần của bản cũ, ghi nhịp tim', () => {
+    const g = bot({ noProcessor: true });
+    for (let i = 0; i < 19; i++) g.sb.ScriptApp.newTrigger('processJobs').timeBased().after(1000).create(); // tích tụ từ bản cũ
     g.sb.installTriggers();
-    g.sb.onAppCommand(cmdEvent(2, 'webinar'));
-    g.sb.onAppCommand(cmdEvent(2, 'webinar abc', { name: 'spaces/AAA/messages/z2' }));
+    expect(g.triggers.map((t) => t.handler).sort()).toEqual(['processJobs', 'tick']);
+    expect(g.triggers.every((t) => t.afterMs === undefined)).toBe(true);
+    expect(ackText(g.sb.onAppCommand(cmdEvent(3, '')))).toMatch(/Em xem đèn/); // đã có nhịp tim
+  });
+  it('chạy installTriggers 2 lần không nhân đôi trigger', () => {
+    const g = bot();
+    g.sb.installTriggers(); g.sb.installTriggers();
     expect(g.triggers.map((t) => t.handler).sort()).toEqual(['processJobs', 'tick']);
   });
-  it('đang đầy trigger (đã tích tụ sẵn từ bản cũ) vẫn tạo được: dọn trước rồi mới tạo', () => {
-    const g = bot();
-    for (let i = 0; i < 19; i++) g.sb.ScriptApp.newTrigger('processJobs').timeBased().after(1000).create();
-    g.sb.ScriptApp.newTrigger('tick').timeBased().everyMinutes(10).create();
-    expect(g.triggers).toHaveLength(20);
-    expect(ackText(g.sb.onAppCommand(cmdEvent(4, 'webinar')))).toMatch(/Em đang phân tích/);
-    expect(g.triggers.map((t) => t.handler).sort()).toEqual(['processJobs', 'tick']);
+  it('selfCheck: chưa có trigger processJobs → ❌ hướng dẫn installTriggers; có nhiều → ❌', () => {
+    const g = bot({ noProcessor: true });
+    expect(g.sb.selfCheck()).toMatch(/❌ Chưa có trigger processJobs mỗi phút/);
+    expect(g.sb.selfCheck()).toMatch(/❌ Bộ xử lý nền chưa từng chạy/);
+    for (let i = 0; i < 4; i++) g.sb.ScriptApp.newTrigger('processJobs').timeBased().after(1000).create();
+    expect(g.sb.selfCheck()).toMatch(/❌ Có 4 trigger processJobs \(chỉ cần 1/);
   });
-  it('lệnh xếp hàng trong lúc đang chạy việc khác → được hẹn lại, không mất', () => {
-    const g = bot();
-    g.sb.onAppCommand(cmdEvent(2, 'webinar', { name: 'spaces/AAA/messages/a' }));
-    const orig = g.sb.runJob_;
-    let injected = false;
-    g.sb.runJob_ = (job: unknown) => { if (!injected) { injected = true; g.sb.onAppCommand(cmdEvent(3, '', { name: 'spaces/AAA/messages/b' })); } orig(job); };
-    drain(g);
-    expect(g.triggers.filter((t) => t.handler === 'processJobs')).toHaveLength(1); // việc thứ hai đã được hẹn lại
-    g.sb.processJobs({ triggerUid: g.triggers[0].id });
-    expect(g.posted.map((p) => p.agent).sort()).toEqual(['analyst', 'ryg']);
-  });
-  it('cleanupTriggers xóa trigger xử lý lệnh, giữ tick; selfCheck cảnh báo khi tích tụ', () => {
+  it('cleanupTriggers xóa mọi trigger processJobs, giữ tick', () => {
     const g = bot();
     for (let i = 0; i < 6; i++) g.sb.ScriptApp.newTrigger('processJobs').timeBased().after(1000).create();
     g.sb.ScriptApp.newTrigger('tick').timeBased().everyMinutes(10).create();
-    expect(g.sb.selfCheck()).toMatch(/❌ Có 6 trigger processJobs tích tụ/);
-    expect(g.sb.cleanupTriggers()).toBe('Đã xóa 6 trigger processJobs. Còn lại 1/20 trigger.');
-    expect(g.triggers.map((t) => t.handler)).toEqual(['tick']);
+    expect(g.sb.cleanupTriggers()).toBe('Đã xóa 6 trigger processJobs. Còn lại 1/20 trigger. Chạy installTriggers để cài lại.');
+    expect(g.triggers.map((x) => x.handler)).toEqual(['tick']);
   });
 });

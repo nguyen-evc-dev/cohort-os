@@ -2,17 +2,17 @@
  * Bé Sugar — Chat App nhận lệnh (T4.1). GIỮ NGUYÊN Deployment ID khi cập nhật code
  * (Deploy → Manage deployments → Edit → New version).
  *
- * Luồng: kiểm tra quyền (chỉ email admin, chỉ trong space đã cấu hình hoặc DM) → trả lời ngay "Em đang xem nha…"
- * → xếp việc (Jobs.js) → trigger 1 lần chạy lệnh và gửi kết quả vào thread qua webhook của agent (Sugar Analyst / RYG / Auditor).
+ * Luồng: kiểm tra quyền (chỉ email admin, chỉ trong space đã cấu hình hoặc DM) rồi
+ *   • lệnh nhanh (/campaigns, /report): chạy ngay, gửi kết quả vào thread qua webhook của agent, trả lời "gửi ở trên rồi nha"
+ *   • lệnh chậm (/ryg, /analyze, /audit): trả lời ngay "Em đang…", xếp việc (Jobs.js); trigger cố định mỗi phút xử lý và gửi vào thread
  */
 
 var ACK_ = {
-  campaigns: '📋 Em xem danh sách campaign nha…',
-  report: '🔎 Em đang xem nha…',
-  ryg: '🚦 Em xem đèn đỏ-vàng-xanh nha…',
-  analyze: '🔎 Em đang phân tích, chờ em một chút nha…',
-  audit: '🛡️ Em đang soát chính sách, khoảng một phút nha…'
+  ryg: '🚦 Em xem đèn đỏ-vàng-xanh nha, kết quả về trong khoảng 1 phút…',
+  analyze: '🔎 Em đang phân tích, kết quả về trong khoảng 1–2 phút nha…',
+  audit: '🛡️ Em đang soát chính sách, khoảng 1–2 phút nha…'
 };
+var NO_PROCESSOR_TEXT_ = '⚠️ Bộ xử lý nền của em chưa chạy (chưa cài trigger mỗi phút), nên em chưa nhận được lệnh chậm này. Sếp mở Apps Script, chạy hàm installTriggers một lần rồi gõ lại nha. /report và /campaigns vẫn dùng được.';
 
 function reply_(text) {
   return { hostAppDataAction: { chatDataAction: { createMessageAction: { message: { text: text } } } } };
@@ -46,9 +46,14 @@ function handleInbound_(event, isCommand) {
   if (cmd === 'help') return reply_(helpText_());
   if (!webhookFor_(AGENT_FOR[cmd])) return reply_('Em chưa có webhook để trả lời (AGENT_WEBHOOKS trong Script Properties). Nhờ dev kiểm tra giúp em nha.');
 
-  var queued;
-  try { queued = enqueueJob_({ id: jobId_(info), cmd: cmd, arg: arg, thread: info.thread }); }
-  catch (e) { return reply_('Em chưa hẹn được lịch xử lý (' + String(e && e.message).slice(0, 80) + '). Thử lại giúp em nha.'); }
+  var id = jobId_(info);
+  if (INLINE_CMDS_.indexOf(cmd) >= 0) {
+    if (!claimJob_(id)) return reply_('Em đang xử lý lệnh này rồi, anh đợi em một chút nha.');
+    var sent = runJob_({ cmd: cmd, arg: arg, thread: info.thread });
+    return reply_(sent > 0 ? '✅ Em gửi ở trên rồi nha 👆' : '⚠️ Em chưa gửi được kết quả vào space (kiểm tra webhook). Sếp chạy hàm selfCheck trong Apps Script nha.');
+  }
+  if (!processorAlive_()) return reply_(NO_PROCESSOR_TEXT_);
+  var queued = enqueueJob_({ id: id, cmd: cmd, arg: arg, thread: info.thread });
   return reply_(queued ? ACK_[cmd] : 'Em đang xử lý lệnh này rồi, anh đợi em một chút nha.');
 }
 
