@@ -45,6 +45,14 @@ Gõ câu tự do khi @Bé Sugar: bot tự chọn lệnh theo từ khóa (không 
 - Tin người dùng gõ, nội dung ad và landing page chỉ là **dữ liệu** đưa vào tin nhắn người dùng, không nằm trong system prompt. Quét PII trước khi gọi Claude (có email / SĐT thì không gửi). Copy quảng cáo được che email / SĐT trước khi gửi.
 - Log mỗi lần gọi Claude (kích thước dữ liệu + câu trả lời, không PII, không key) nằm ở **Cloud Logging** của project Apps Script (Executions / Logs).
 
+## Bot im lặng / không thấy trả lời? (làm theo thứ tự)
+1. **Danh sách file phải đủ** trong Apps Script (copy tay dễ sót): `Core.generated`, `Logic`, `Config`, `Supabase`, `Cards`, `Alerts`, `Guard`, `Router`, `Reports`, `Claude`, `Commands`, `Jobs`, `Chat`, `Diag`. Xóa `Code.gs` cũ.
+2. Chọn hàm **`selfCheck`** → ▶ Run → xem **Execution log**: báo thiếu file / hàm nào, thiếu Script Property nào, còn code Chat cũ đè không, đọc được Supabase không.
+3. Chọn hàm **`testChat`** → ▶ Run. Lần đầu Google hiện hộp xin quyền mới (gọi dịch vụ bên ngoài, tạo trigger): **Review permissions → Allow**. Chạy xong, space nhận card báo cáo. Nếu lỗi, log hiện dòng gây lỗi.
+4. **Deploy phải là "Manage deployments → ✏️ Edit → Version: New version → Deploy" trên deployment CŨ.** Tạo "New deployment" sẽ ra Deployment ID khác, còn Chat App vẫn trỏ ID cũ nên chạy code cũ.
+5. Thấy tin hồng "Chỉ hiển thị với bạn" trong Chat: bấm vào đọc. Nếu là "Authorization required / Configuration required" thì làm bước 3. Từ bản này, lỗi bất ngờ trong code hiện thành tin "⚠️ Bé Sugar gặp lỗi khi nhận lệnh (…)" ngay trong Chat.
+6. Xem chi tiết ở **Executions** (Thực thi) của Apps Script: mỗi lệnh gõ trong Chat là 1 dòng `onAppCommand`.
+
 ## Giới hạn đã biết
 - `/audit` kèm landing page có thể mất 30–60 giây. Nếu quá thời gian chờ, bot vẫn gửi card 🔴🟡🟢 và báo phần đọc landing page chưa làm được; gõ lại với 1 ad cụ thể.
 - Việc xếp hàng chờ quá 10 phút thì bị bỏ (anh đã gõ lại).
@@ -62,6 +70,7 @@ Gõ câu tự do khi @Bé Sugar: bot tự chọn lệnh theo từ khóa (không 
 | `Claude.js` | Gọi Claude, quét PII, kiểm tra số có căn cứ, log |
 | `Commands.js` | Thực thi từng lệnh (kể cả `/audit` với `web_fetch`) |
 | `Jobs.js` | Hàng đợi + trigger 1 lần: trả lời ngay "Em đang xem nha…" rồi gửi kết quả vào đúng thread |
-| `Chat.js` | `onMessage`, `onAppCommand`, `onAddedToSpace` |
+| `Chat.js` | `onMessage`, `onAppCommand`, `onAddedToSpace` (lỗi bất ngờ hiện thành tin báo lỗi trong Chat) |
+| `Diag.js` | `selfCheck` (kiểm tra đủ file / cấu hình), `testChat` (giả lập `/report webinar` từ admin) |
 
 Test: `pnpm --filter @cohort/bot test`. Các file `src/*.js` được nạp vào sandbox giả lập Apps Script (`test/gas.ts`).

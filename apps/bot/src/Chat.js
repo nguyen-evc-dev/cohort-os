@@ -52,12 +52,27 @@ function handleInbound_(event, isCommand) {
   return reply_(queued ? ACK_[cmd] : 'Em đang xử lý lệnh này rồi, anh đợi em một chút nha.');
 }
 
-function onMessage(event) { return handleInbound_(event, false); }
-function onAppCommand(event) { return handleInbound_(event, true); }
+/**
+ * Lỗi bất ngờ (thiếu file, thiếu hàm, lỗi quyền…) phải hiện ra trong Chat thay vì im lặng. Ghi vào Executions để xem chi tiết.
+ * Chỉ nói loại lỗi + hướng xử lý, không lộ dữ liệu.
+ */
+function safeInbound_(event, isCommand) {
+  try {
+    return handleInbound_(event, isCommand);
+  } catch (e) {
+    try { console.error('Chat lỗi: ' + (e && e.stack ? e.stack : e)); } catch (x) { /* bỏ qua */ }
+    var m = String((e && e.message) || e).slice(0, 110);
+    return reply_('⚠️ Bé Sugar gặp lỗi khi nhận lệnh (' + m + '). Sếp mở Apps Script, chạy hàm selfCheck để xem thiếu gì, hoặc xem mục Executions.');
+  }
+}
+function onMessage(event) { return safeInbound_(event, false); }
+function onAppCommand(event) { return safeInbound_(event, true); }
 
 function onAddedToSpace(event) {
-  var auth = authorize_(eventInfo_(event));
-  if (!auth.ok) return reply_(auth.text);
+  try {
+    var auth = authorize_(eventInfo_(event));
+    if (!auth.ok) return reply_(auth.text);
+  } catch (e) { return reply_('⚠️ Bé Sugar vào space được nhưng đang lỗi cấu hình. Sếp chạy hàm selfCheck trong Apps Script nha.'); }
   return reply_('Chào sếp Nguyên! Bé Sugar đã vào space 🍬 Gõ /help để xem lệnh.');
 }
 

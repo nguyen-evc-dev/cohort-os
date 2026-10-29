@@ -402,3 +402,44 @@ describe('T4.5 — /audit', () => {
     expect(textOf(g.posted[0].body)).not.toContain('Seller Video 1');
   });
 });
+
+describe('chẩn đoán khi bot im lặng', () => {
+  it('thiếu file / hàm → báo lỗi TRONG CHAT (không im lặng), không lộ dữ liệu', () => {
+    const g = bot();
+    g.sb.eventInfo_ = undefined; // như khi quên tạo file Guard
+    const r = ackText(g.sb.onAppCommand(cmdEvent(2, 'webinar')));
+    expect(r).toMatch(/Bé Sugar gặp lỗi khi nhận lệnh/);
+    expect(r).toMatch(/selfCheck/);
+    expect(g.logs.join('\n')).toMatch(/Chat lỗi/);
+    expect(g.triggers).toEqual([]);
+  });
+  it('selfCheck: đủ file + cấu hình → ✅ và đọc được bản chụp', () => {
+    const g = bot();
+    const out = g.sb.selfCheck();
+    expect(out).toMatch(/✅ Đủ \d+ hàm cần thiết/);
+    expect(out).toMatch(/✅ CohortCore có 4 skill/);
+    expect(out).toMatch(/✅ Đọc được 6 bản chụp báo cáo/);
+    expect(out).toMatch(/Mọi thứ ổn/);
+    expect(out).not.toMatch(/sb_publishable|ttttt/);
+  });
+  it('selfCheck: thiếu hàm, thiếu property, chưa có bản chụp → liệt kê rõ', () => {
+    const g = bot({ db: { ...DB, v_project_snapshot: [] }, props: { BOT_TOKEN: null } });
+    g.sb.reportCard_ = undefined;
+    const out = g.sb.selfCheck();
+    expect(out).toMatch(/❌ Thiếu hàm: reportCard_/);
+    expect(out).toMatch(/❌ Thiếu Script Property BOT_TOKEN/);
+    expect(out).toMatch(/Có \d+ vấn đề/);
+  });
+  it('selfCheck phát hiện code Chat cũ còn đè', () => {
+    const g = bot();
+    g.sb.onAppCommand = function () { return 'Tính năng này đang được xây'; };
+    expect(g.sb.selfCheck()).toMatch(/❌ Vẫn còn code Chat CŨ/);
+  });
+  it('testChat: chạy trọn đường đi /report webinar và gửi card vào space', () => {
+    const g = bot();
+    const reply = g.sb.testChat();
+    expect(ackText(reply)).toBe('🔎 Em đang xem nha…');
+    expect(g.posted).toHaveLength(1);
+    expect(g.posted[0].body.cardsV2[0].card.header.title).toBe('🔎 Webinar RE11');
+  });
+});

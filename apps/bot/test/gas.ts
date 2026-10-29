@@ -8,7 +8,7 @@ import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 
 const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src');
-export const FILES = ['Core.generated.js', 'Logic.js', 'Config.js', 'Supabase.js', 'Cards.js', 'Alerts.js', 'Guard.js', 'Router.js', 'Reports.js', 'Claude.js', 'Commands.js', 'Jobs.js', 'Chat.js'];
+export const FILES = ['Core.generated.js', 'Logic.js', 'Config.js', 'Supabase.js', 'Cards.js', 'Alerts.js', 'Guard.js', 'Router.js', 'Reports.js', 'Claude.js', 'Commands.js', 'Jobs.js', 'Chat.js', 'Diag.js'];
 
 export function fmt(d: Date, tz: string): string {
   const p: Record<string, string> = {};
