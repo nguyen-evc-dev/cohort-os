@@ -51,7 +51,8 @@ Gõ câu tự do khi @Bé Sugar: bot tự chọn lệnh theo từ khóa (không 
 3. Chọn hàm **`testChat`** → ▶ Run. Lần đầu Google hiện hộp xin quyền mới (gọi dịch vụ bên ngoài, tạo trigger): **Review permissions → Allow**. Chạy xong, space nhận card báo cáo. Nếu lỗi, log hiện dòng gây lỗi.
 4. **Deploy phải là "Manage deployments → ✏️ Edit → Version: New version → Deploy" trên deployment CŨ.** Tạo "New deployment" sẽ ra Deployment ID khác, còn Chat App vẫn trỏ ID cũ nên chạy code cũ.
 5. Thấy tin hồng "Chỉ hiển thị với bạn" trong Chat: bấm vào đọc. Nếu là "Authorization required / Configuration required" thì làm bước 3. Từ bản này, lỗi bất ngờ trong code hiện thành tin "⚠️ Bé Sugar gặp lỗi khi nhận lệnh (…)" ngay trong Chat.
-6. Xem chi tiết ở **Executions** (Thực thi) của Apps Script: mỗi lệnh gõ trong Chat là 1 dòng `onAppCommand`.
+6. Lỗi "too many time-based triggers" (giới hạn 20 trigger của Apps Script): chạy hàm **`cleanupTriggers`** một lần (xóa trigger xử lý lệnh tích tụ, giữ trigger `tick`). Từ bản này mỗi lần chỉ giữ đúng 1 trigger xử lý.
+7. Xem chi tiết ở **Executions** (Thực thi) của Apps Script: mỗi lệnh gõ trong Chat là 1 dòng `onAppCommand`.
 
 ## Giới hạn đã biết
 - `/audit` kèm landing page có thể mất 30–60 giây. Nếu quá thời gian chờ, bot vẫn gửi card 🔴🟡🟢 và báo phần đọc landing page chưa làm được; gõ lại với 1 ad cụ thể.

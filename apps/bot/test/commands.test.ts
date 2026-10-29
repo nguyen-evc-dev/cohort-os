@@ -443,3 +443,47 @@ describe('chẩn đoán khi bot im lặng', () => {
     expect(g.posted[0].body.cardsV2[0].card.header.title).toBe('🔎 Webinar RE11');
   });
 });
+
+describe('giới hạn 20 trigger của Apps Script', () => {
+  it('30 lệnh liên tiếp (chưa xử lý) → luôn chỉ còn đúng 1 trigger processJobs, không tích tụ', () => {
+    const g = bot();
+    for (let i = 0; i < 30; i++) g.sb.onAppCommand(cmdEvent(2, 'webinar', { name: `spaces/AAA/messages/q${i}` }));
+    expect(g.triggers.filter((t) => t.handler === 'processJobs')).toHaveLength(1);
+    drain(g);
+    expect(g.posted).toHaveLength(30); // 1 trigger xử lý hết mọi việc đã xếp
+  });
+  it('trigger tick nhắc việc KHÔNG bị dọn nhầm', () => {
+    const g = bot();
+    g.sb.installTriggers();
+    g.sb.onAppCommand(cmdEvent(2, 'webinar'));
+    g.sb.onAppCommand(cmdEvent(2, 'webinar abc', { name: 'spaces/AAA/messages/z2' }));
+    expect(g.triggers.map((t) => t.handler).sort()).toEqual(['processJobs', 'tick']);
+  });
+  it('đang đầy trigger (đã tích tụ sẵn từ bản cũ) vẫn tạo được: dọn trước rồi mới tạo', () => {
+    const g = bot();
+    for (let i = 0; i < 19; i++) g.sb.ScriptApp.newTrigger('processJobs').timeBased().after(1000).create();
+    g.sb.ScriptApp.newTrigger('tick').timeBased().everyMinutes(10).create();
+    expect(g.triggers).toHaveLength(20);
+    expect(ackText(g.sb.onAppCommand(cmdEvent(4, 'webinar')))).toMatch(/Em đang phân tích/);
+    expect(g.triggers.map((t) => t.handler).sort()).toEqual(['processJobs', 'tick']);
+  });
+  it('lệnh xếp hàng trong lúc đang chạy việc khác → được hẹn lại, không mất', () => {
+    const g = bot();
+    g.sb.onAppCommand(cmdEvent(2, 'webinar', { name: 'spaces/AAA/messages/a' }));
+    const orig = g.sb.runJob_;
+    let injected = false;
+    g.sb.runJob_ = (job: unknown) => { if (!injected) { injected = true; g.sb.onAppCommand(cmdEvent(3, '', { name: 'spaces/AAA/messages/b' })); } orig(job); };
+    drain(g);
+    expect(g.triggers.filter((t) => t.handler === 'processJobs')).toHaveLength(1); // việc thứ hai đã được hẹn lại
+    g.sb.processJobs({ triggerUid: g.triggers[0].id });
+    expect(g.posted.map((p) => p.agent).sort()).toEqual(['analyst', 'ryg']);
+  });
+  it('cleanupTriggers xóa trigger xử lý lệnh, giữ tick; selfCheck cảnh báo khi tích tụ', () => {
+    const g = bot();
+    for (let i = 0; i < 6; i++) g.sb.ScriptApp.newTrigger('processJobs').timeBased().after(1000).create();
+    g.sb.ScriptApp.newTrigger('tick').timeBased().everyMinutes(10).create();
+    expect(g.sb.selfCheck()).toMatch(/❌ Có 6 trigger processJobs tích tụ/);
+    expect(g.sb.cleanupTriggers()).toBe('Đã xóa 6 trigger processJobs. Còn lại 1/20 trigger.');
+    expect(g.triggers.map((t) => t.handler)).toEqual(['tick']);
+  });
+});

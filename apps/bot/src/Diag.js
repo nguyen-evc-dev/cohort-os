@@ -30,6 +30,13 @@ function selfCheck() {
     else ok('Không còn code Chat cũ đè.');
   } catch (e) { /* bỏ qua */ }
 
+  var counts = {};
+  ScriptApp.getProjectTriggers().forEach(function (t) { var h = t.getHandlerFunction(); counts[h] = (counts[h] || 0) + 1; });
+  var total = Object.keys(counts).reduce(function (s, k) { return s + counts[k]; }, 0);
+  lines.push('ℹ️ Trigger: ' + total + '/20 (' + (Object.keys(counts).map(function (k) { return k + ' ' + counts[k]; }).join(', ') || 'không có') + ')');
+  if ((counts.processJobs || 0) > 2) bad('Có ' + counts.processJobs + ' trigger processJobs tích tụ (giới hạn 20 làm lệnh lỗi "too many triggers"). Chạy hàm cleanupTriggers.');
+  if (!counts.tick) lines.push('⚠️ Chưa có trigger tick (nhắc việc sau sync). Chạy hàm installTriggers nếu muốn nhận tin tự động.');
+
   var props = PropertiesService.getScriptProperties();
   REQUIRED_PROPERTIES_.forEach(function (k) { if (!props.getProperty(k)) bad('Thiếu Script Property ' + k + '.'); });
   try {
@@ -72,4 +79,13 @@ function testChat() {
     throw e;
   }
   return reply;
+}
+
+/** Xóa mọi trigger xử lý lệnh tích tụ (giữ trigger tick nhắc việc). Chạy 1 lần khi gặp lỗi "too many triggers". */
+function cleanupTriggers() {
+  var n = purgeJobTriggers_();
+  var left = ScriptApp.getProjectTriggers().length;
+  var out = 'Đã xóa ' + n + ' trigger processJobs. Còn lại ' + left + '/20 trigger.';
+  Logger.log(out);
+  return out;
 }

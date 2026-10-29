@@ -13,6 +13,29 @@ function jobId_(info) {
   return base.replace(/[^A-Za-z0-9]+/g, '_').slice(-70);
 }
 
+/**
+ * Apps Script cho tối đa 20 trigger / người dùng / dự án, và trigger hẹn giờ 1 lần KHÔNG tự biến mất sau khi chạy.
+ * Nên mỗi lần hẹn đều dọn hết trigger processJobs cũ trước: việc nằm trong Script Properties, trigger nào chạy cũng xử lý hết,
+ * vì vậy luôn chỉ cần đúng 1 trigger đang chờ.
+ */
+function purgeJobTriggers_() {
+  var n = 0;
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'processJobs') { try { ScriptApp.deleteTrigger(t); n += 1; } catch (e) { /* đã bị xóa */ } }
+  });
+  return n;
+}
+
+function scheduleProcess_() {
+  purgeJobTriggers_();
+  ScriptApp.newTrigger('processJobs').timeBased().after(1000).create();
+}
+
+function hasPendingJobs_() {
+  var all = PropertiesService.getScriptProperties().getProperties();
+  return Object.keys(all).some(function (k) { return k.indexOf(JOB_PREFIX_) === 0; });
+}
+
 /** true = đã xếp việc; false = việc này đã có / đã chạy (bỏ qua). Ném lỗi nếu không hẹn được trigger. */
 function enqueueJob_(job) {
   var props = PropertiesService.getScriptProperties();
@@ -21,7 +44,7 @@ function enqueueJob_(job) {
   if (CacheService.getScriptCache().get('DONE_' + job.id)) return false;
   props.setProperty(key, JSON.stringify({ cmd: job.cmd, arg: String(job.arg || '').slice(0, 300), thread: job.thread || null, at: Date.now() }));
   try {
-    ScriptApp.newTrigger('processJobs').timeBased().after(1000).create();
+    scheduleProcess_();
   } catch (e) {
     props.deleteProperty(key);
     throw e;
@@ -56,7 +79,11 @@ function runJob_(job) {
 /** Trigger entry point (installable one-time trigger). */
 function processJobs(e) {
   var lock = LockService.getScriptLock();
-  if (!lock.tryLock(10000)) return;
+  if (!lock.tryLock(10000)) {
+    // Đang bận (việc khác đang chạy): hẹn lại để việc đã xếp không bị bỏ quên
+    try { if (hasPendingJobs_()) scheduleProcess_(); } catch (e) { console.error('hẹn lại lỗi: ' + String(e && e.message).slice(0, 200)); }
+    return;
+  }
   try {
     dropFiredTrigger_(e);
     var props = PropertiesService.getScriptProperties();
@@ -72,4 +99,6 @@ function processJobs(e) {
   } finally {
     lock.releaseLock();
   }
+  // Có lệnh mới xếp hàng trong lúc đang chạy (trigger của nó đã bị dọn) → hẹn lại 1 lần
+  try { if (hasPendingJobs_()) scheduleProcess_(); } catch (e) { console.error('hẹn lại lỗi: ' + String(e && e.message).slice(0, 200)); }
 }
